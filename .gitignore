@@ -1,0 +1,22 @@
+# Rust
+/target
+
+# OS
+.DS_Store
+
+# Data
+*.mzML
+
+# Plots & test results
+/*.tsv
+/prints
+
+# IDSs
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py

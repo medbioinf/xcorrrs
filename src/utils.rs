@@ -66,7 +66,7 @@ pub mod tests {
                     .with_comment_prefix(Some("#")),
             )
             .try_into_reader_with_file_path(Some(PathBuf::from(
-                "test_files/LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.tsv.gz",
+                "test_files/LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.tsv",
             )))
             .unwrap()
             .finish()

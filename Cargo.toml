@@ -2,6 +2,7 @@
 name = "xcorrrs"
 version = "0.0.1"
 edition = "2021"
+description = "Reimplmenmentation of Comet's xcorr algorithm."
 repository = "https://github.com/medbioinf/xcorrrs"
 homepage = "https://github.com/medbioinf/xcorrrs"
 documentation = "https://docs.rs/xcorrrs"

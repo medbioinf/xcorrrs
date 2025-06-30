@@ -14,10 +14,19 @@ Standalone Rust implementation of Comet's XCorr based on
   > 2008;7(10):4598-4602.    
   > doi:10.1021/pr800420s   
 
+## Features
+
+| feature | description |
+| --- | --- |
+| do-not-use-fast-xcorr | Enables the fast xcorr implementation. While it is functional it is not correctly implemented yet. |
+
+
 ## Tests
 For each PSM in `test_files/LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.tsv` the matched peptide is converted to a Proforma String, including PSMs, and matched against the spectrum from the MS run using the xcorr reimplementation. The root means squared error is than calulated on Comet's reported xcorr and the results of the reimplementation (scaled by the highest Xcorr of both implementations). Accepted is RMSE below 0.02.
 
 For development and debug purposes, the number of PSMs can be limited setting the environment variable: `TEST_NUMBER_OF_PSMS`
+
+To test the fast xcorr add `--all-features` to the test command.
 
 ### Test prints
 For the fast xcorr implementation prints can be generated for a visual inspection of the experimental and theoretical spectrum before and after preprocessin. The test case is skipped by default and can be executed by calling:

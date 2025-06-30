@@ -54,8 +54,10 @@ pub mod tests {
     }
 
     /// Reads the test data from a TSV file and processes it to include a new column for proforma peptides.
+    /// TEST_NUMBER_OF_PSMS environment variable limits to the X best scored PSMs.
     ///
     pub fn read_test_data() -> DataFrame {
+        // Read the Comet results from a TSV file
         let mut comet_df = CsvReadOptions::default()
             .with_has_header(true)
             .with_parse_options(
@@ -70,6 +72,21 @@ pub mod tests {
             .finish()
             .unwrap();
 
+        // Sort by xcorr in descending order
+        comet_df
+            .sort_in_place(
+                ["xcorr"],
+                SortMultipleOptions::default().with_order_descending(true),
+            )
+            .unwrap();
+
+        // Reduce the number of PSMs if the environment variable is set
+        let mut comet_df = match std::env::var("TEST_NUMBER_OF_PSMS") {
+            Ok(number_of_psms) => comet_df.slice(0, number_of_psms.parse::<usize>().unwrap()),
+            Err(_) => comet_df,
+        };
+
+        // Create the proforma peptides column
         let modified_peptide = comet_df.column("modified_peptide").unwrap().str().unwrap();
         let profoma_peptides = modified_peptide
             .iter()
@@ -91,13 +108,6 @@ pub mod tests {
                 Series::new("proforma_peptide".into(), profoma_peptides)
                     .cast(&DataType::String)
                     .unwrap(),
-            )
-            .unwrap();
-
-        comet_df
-            .sort_in_place(
-                ["xcorr"],
-                SortMultipleOptions::default().with_order_descending(true),
             )
             .unwrap();
 
@@ -134,7 +144,9 @@ pub mod tests {
         (mz_array, intensity_array)
     }
 
-    // Extracts spectru, data arrays from the mzML file and saves them as Parquet files without any further metadata
+    /// Extracts spectru, data arrays from the mzML file and saves them as Parquet files without any further metadata
+    /// Important do not set TEST_NUMBER_OF_PSMS environment variable, as this will limit the spectrum extraction to a certain number of scans.
+    ///
     #[test]
     #[ignore = "Spectrum extration."]
     fn spectrum_extraction() {

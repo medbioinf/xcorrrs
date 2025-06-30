@@ -270,16 +270,11 @@ mod tests {
     fn test_xcorr() {
         let comet_df = read_test_data();
 
-        let number_of_psms = match std::env::var("TEST_NUMBER_OF_PSMS") {
-            Ok(env_value) => env_value.parse::<usize>().unwrap(),
-            Err(_) => comet_df.height(),
-        };
-
         #[allow(clippy::type_complexity)]
         let (scan_col, (peptide_col, (comet_xcorr_col, xcorrrs_col))): (
             Vec<i64>,
             (Vec<String>, (Vec<f64>, Vec<f64>)),
-        ) = (0..number_of_psms)
+        ) = (0..comet_df.height())
             .into_par_iter()
             .map(|idx| {
                 let scan = comet_df["scan"].i64().unwrap().get(idx).unwrap();
@@ -424,12 +419,7 @@ mod tests {
 
         let config = Configuration::default();
 
-        let number_of_psms = match std::env::var("TEST_NUMBER_OF_PSMS") {
-            Ok(env_value) => env_value.parse::<usize>().unwrap(),
-            Err(_) => comet_df.height(),
-        };
-
-        for i in 0..number_of_psms {
+        for i in 0..comet_df.height() {
             let scan = comet_df["scan"].i64().unwrap().get(i).unwrap();
             let _xcorr = comet_df["xcorr"].f64().unwrap().get(i).unwrap();
             let proforma_peptide = comet_df["proforma_peptide"].str().unwrap().get(i).unwrap();

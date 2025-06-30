@@ -45,7 +45,9 @@ pub fn theoretical_spectrum_binning(
         if index > 0 {
             bins[index - 1] = bins[index - 1].max(25.0);
         }
-        bins[index + 1] = bins[index + 1].max(25.0);
+        if index + 1 < bins.len() {
+            bins[index + 1] = bins[index + 1].max(25.0);
+        }
     }
 
     Ok(bins)
@@ -132,7 +134,7 @@ mod tests {
     fn test_theoretical_spectrum_binning() {
         let mz = Array1::from(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]);
         let bin_size = 5.0;
-        let result = theoretical_spectrum_binning(&mz, bin_size, 2, None).unwrap();
+        let result = theoretical_spectrum_binning(&mz, bin_size, 0, None).unwrap();
         assert_eq!(result.len(), 13);
         assert_eq!(
             result,

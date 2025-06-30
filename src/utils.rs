@@ -121,7 +121,7 @@ pub mod tests {
     ///
     pub fn get_spectrum(scan: &str) -> (Array1<f64>, Array1<f64>) {
         let spec_df = ParquetReader::new(
-            std::fs::File::open(format!("test_files/spectra/scan_{}.parquet", scan)).unwrap(),
+            std::fs::File::open(format!("test_files/spectra/scan_{scan}.parquet")).unwrap(),
         )
         .read_parallel(ParallelStrategy::None)
         .finish()
@@ -168,10 +168,7 @@ pub mod tests {
             let scan = comet_df["scan"].i64().unwrap().get(i).unwrap();
 
             let binary_data_array_list = mzml
-                .get_spectrum(&format!(
-                    "controllerType=0 controllerNumber=1 scan={}",
-                    scan
-                ))
+                .get_spectrum(&format!("controllerType=0 controllerNumber=1 scan={scan}"))
                 .unwrap()
                 .binary_data_array_list;
 
@@ -193,7 +190,7 @@ pub mod tests {
             .unwrap();
 
             let writer = ParquetWriter::new(
-                std::fs::File::create(format!("test_files/spectra/scan_{}.parquet", scan)).unwrap(),
+                std::fs::File::create(format!("test_files/spectra/scan_{scan}.parquet")).unwrap(),
             )
             .with_compression(ParquetCompression::Zstd(Some(
                 ZstdLevel::try_new(22).unwrap(),

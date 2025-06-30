@@ -347,14 +347,8 @@ mod tests {
                 let scoring = match xcorr.xcorr_peptide(proforma_peptide, charge) {
                     Ok(scoring) => scoring,
                     Err(err) => {
-                        println!(
-                            "Empty theoretical spectrum for scan {} and peptide {}",
-                            scan, err
-                        );
-                        panic!(
-                            "Empty theoretical spectrum for scan {} and peptide {}",
-                            scan, err
-                        );
+                        println!("Empty theoretical spectrum for scan {scan} and peptide {err}",);
+                        panic!("Empty theoretical spectrum for scan {scan} and peptide {err}",);
                     }
                 };
 
@@ -465,6 +459,6 @@ mod tests {
             .unwrap();
 
         // RMSE under 0.02 should be good enough
-        assert!(rmse < 0.02, "RMSE > 0.02: {}", rmse);
+        assert!(rmse < 0.02, "RMSE {rmse} >= 0.02");
     }
 }

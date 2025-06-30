@@ -395,7 +395,7 @@ mod tests {
             .unwrap();
 
         // RMSE under 0.02 should be good enough
-        assert!(rmse < 0.02, "RMSE > 0.02: {}", rmse);
+        assert!(rmse < 0.02, "RMSE {rmse} >= 0.02");
     }
 
     /// Creates plots of the the spectra for visual inspection.
@@ -426,7 +426,7 @@ mod tests {
             let charge = comet_df["charge"].i64().unwrap().get(i).unwrap() as usize;
             let exp_neutral_mass = comet_df["exp_neutral_mass"].f64().unwrap().get(i).unwrap();
 
-            let plot_base_path = prints_folder.join(format!("{}_scan_{}", i, scan));
+            let plot_base_path = prints_folder.join(format!("{i}_scan_{scan}"));
             std::fs::create_dir_all(&plot_base_path).unwrap();
 
             let peptide = CompoundPeptidoformIon::pro_forma(proforma_peptide, None).unwrap();
@@ -443,10 +443,7 @@ mod tests {
 
             // figure 1a
             let binary_data_array_list = mzml
-                .get_spectrum(&format!(
-                    "controllerType=0 controllerNumber=1 scan={}",
-                    scan
-                ))
+                .get_spectrum(&format!("controllerType=0 controllerNumber=1 scan={scan}"))
                 .unwrap()
                 .binary_data_array_list;
 
@@ -491,8 +488,7 @@ mod tests {
             plot.set_layout(
                 plotly::Layout::new()
                     .title(format!(
-                        "{} / {} Da / {} charge - original spectrum",
-                        proforma_peptide, exp_neutral_mass, charge,
+                        "{proforma_peptide} / {exp_neutral_mass} Da / {charge} charge - original spectrum"
                     ))
                     .box_gap(0.4),
             );
@@ -517,8 +513,7 @@ mod tests {
             plot.set_layout(
                 plotly::Layout::new()
                     .title(format!(
-                        "{} / {} Da / {} charge - square root intensities",
-                        proforma_peptide, exp_neutral_mass, charge,
+                        "{proforma_peptide} / {exp_neutral_mass} Da / {charge} charge - square root intensities"
                     ))
                     .box_gap(0.4),
             );
@@ -557,8 +552,7 @@ mod tests {
             plot.set_layout(
                 plotly::Layout::new()
                     .title(format!(
-                        "{} / {} Da / {} charge - intensities normalized spectrum",
-                        proforma_peptide, exp_neutral_mass, charge,
+                        "{proforma_peptide} / {exp_neutral_mass} Da / {charge} charge - intensities normalized spectrum"
                     ))
                     .box_gap(0.4),
             );
@@ -599,8 +593,7 @@ mod tests {
             plot.set_layout(
                 plotly::Layout::new()
                     .title(format!(
-                        "{} / {} Da / {} charge - fast xcorr spectrum",
-                        proforma_peptide, exp_neutral_mass, charge,
+                        "{proforma_peptide} / {exp_neutral_mass} Da / {charge} charge - fast xcorr spectrum"
                     ))
                     .box_gap(0.4),
             );

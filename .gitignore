@@ -9,6 +9,7 @@
 
 # Plots & test results
 /*.tsv
+/*.html
 /prints
 
 # IDSs

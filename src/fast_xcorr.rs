@@ -72,11 +72,7 @@ impl FastXcorr<'_> {
             shift,
         )?;
 
-        // NOTE: Removing the negative intensities is not mentioned in the paper, but seems to be necessary? (drop RMSE from 0.5 to 0.12)
-        let y_prime = Self::calc_y_prime(&binned_experimental_spectrum, shift)
-            .into_iter()
-            .map(|x| x.max(0.0))
-            .collect::<Array1<f64>>();
+        let y_prime = Self::calc_y_prime(&binned_experimental_spectrum, shift);
 
         Ok(FastXcorr {
             config,

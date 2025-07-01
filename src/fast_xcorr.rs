@@ -86,7 +86,7 @@ impl FastXcorr<'_> {
     ///
     /// Arguments:
     /// * `binned_experimental_spectrum` - The binned experimental m/z values +/- m/z shift.
-    /// * `shift` - Number of bins to shift.
+    /// * `shift` - Number of shifted bins applied to the binned experimental spectrum.
     ///
     pub fn calc_y_prime_shift(
         binned_experimental_spectrum: &Array1<f64>,
@@ -95,6 +95,7 @@ impl FastXcorr<'_> {
         // Extend by `shift` bins on both sides
         let mut y_prime_shift = Array1::zeros(binned_experimental_spectrum.len());
 
+        // Binned spectrum wihtout the shifts
         let shiftless_binned_spectrum = binned_experimental_spectrum
             .slice(s![shift..binned_experimental_spectrum.len() - shift]);
 
@@ -120,7 +121,7 @@ impl FastXcorr<'_> {
     ///
     /// Arguments:
     /// * `binned_experimental_spectrum` - The binned experimental m/z values +/- m/z shift.
-    /// * `shift` - Number of bins to shift.
+    /// * `shift` - Number of shifted bins applied to the binned experimental spectrum.
     ///
     pub fn calc_y_prime(binned_experimental_spectrum: &Array1<f64>, shift: usize) -> Array1<f64> {
         let mut y_prime_shift = Self::calc_y_prime_shift(binned_experimental_spectrum, shift);

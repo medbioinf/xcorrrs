@@ -139,9 +139,7 @@ impl FastXcorr<'_> {
         binned_theoretical_spectrum: &Array1<f64>,
         y_prime: &Array1<f64>,
     ) -> f64 {
-        // NOTE: / 10000.0 is not mentioned in the paper, but seems to be necessary to match the results
-        // Also the correlations-version is using this scaling
-        binned_theoretical_spectrum.dot(y_prime) / 10000.0
+        binned_theoretical_spectrum.dot(y_prime)
     }
 
     /// Calculates the xcorr between a peptide and the experimental spectrum

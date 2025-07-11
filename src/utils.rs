@@ -1,5 +1,9 @@
 use ndarray::Array1;
-use rustyms::{Element::H as Hydrogen, Fragment, MassMode};
+use rustyms::{
+    fragment::FragmentType,
+    system::{e, usize::Charge},
+    CompoundPeptidoformIon, FragmentationModel, MassMode,
+};
 
 use crate::error::Error;
 
@@ -22,13 +26,15 @@ pub fn mass_to_charge_to_dalton(mz: f64, charge: usize) -> f64 {
 /// * `max_mz` - The maximum m/z value to consider for the fragments.
 ///
 pub fn create_threoretical_spectrum(
-    fragments: &[Fragment],
+    peptide: &CompoundPeptidoformIon,
+    fragmentation_model: &FragmentationModel,
     max_charge: usize,
     max_mz: f64,
 ) -> Result<Array1<f64>, Error> {
-    let mut mz: Vec<f64> = fragments
-        .iter()
-        .filter(|f| f.charge.value <= max_charge)
+    let mut mz: Vec<f64> = peptide
+        .generate_theoretical_fragments(Charge::new::<e>(max_charge), fragmentation_model)
+        .into_iter()
+        .filter(|f| f.ion != FragmentType::Precursor)
         .filter_map(|f| f.mz(MassMode::Monoisotopic).map(|mz| mz.value))
         .filter(|mz| *mz <= max_mz)
         .collect();

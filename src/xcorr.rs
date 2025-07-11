@@ -263,13 +263,12 @@ impl Xcorr<'_> {
             fragment_charge = self.config.max_fragment_charge;
         }
 
-        let fragments = peptide.generate_theoretical_fragments(
-            Charge::new::<e>(fragment_charge),
+        let theoretical_spectrum = create_threoretical_spectrum(
+            &peptide,
             &self.config.fragmentation_model,
-        );
-
-        let theoretical_spectrum =
-            create_threoretical_spectrum(&fragments, fragment_charge, self.max_experimental_mz)?;
+            fragment_charge,
+            self.max_experimental_mz,
+        )?;
 
         let ions_total = theoretical_spectrum.len();
 

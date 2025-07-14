@@ -7,6 +7,9 @@ use rustyms::{
 
 use crate::error::Error;
 
+/// +/- m/z shift for the y' calculation.
+const MZ_SHIFT: f64 = 75.0;
+
 /// Converts mass to charge ration (Thompson) as Dalton
 ///
 /// # Arguments
@@ -16,6 +19,15 @@ use crate::error::Error;
 pub fn mass_to_charge_to_dalton(mz: f64, charge: usize) -> f64 {
     let charge = charge as f64;
     mz * charge - Hydrogen.mass(None).unwrap().value * charge
+}
+
+/// Calculates the number of bins for the spectrum shift of y'
+///
+/// # Arguments
+/// * `bin_size` - The size of each bin in m/z units.
+///
+pub fn calculate_number_of_bins_to_shift(bin_size: f64) -> usize {
+    (MZ_SHIFT / bin_size).ceil() as usize
 }
 
 /// Creates a theoretical spectrum from a list of fragments.

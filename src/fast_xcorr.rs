@@ -64,7 +64,7 @@ impl FastXcorr<'_> {
 
         let max_experimental_mz = *filtered_experimental_spectrum.0.last().unwrap();
 
-        let shift = (MZ_SHIFT as f64 / config.bin_size) as usize;
+        let shift = calculate_number_of_bins_to_shift(config.bin_size);
         let binned_experimental_spectrum = experimental_spectrum_binning(
             &filtered_experimental_spectrum.0,
             &filtered_experimental_spectrum.1,

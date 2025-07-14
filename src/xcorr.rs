@@ -1,20 +1,14 @@
 use ndarray::{s, Array1, Axis, Slice};
 use ndrustfft::{ndfft, ndifft, Complex, FftHandler};
-use rustyms::{
-    system::{e, usize::Charge},
-    CompoundPeptidoformIon,
-};
+use rustyms::CompoundPeptidoformIon;
 
 use crate::{
     binning::{experimental_spectrum_binning, theoretical_spectrum_binning},
     configuration::Configuration,
     error::Error,
     scoring_result::ScoringResult,
-    utils::create_threoretical_spectrum,
+    utils::{calculate_number_of_bins_to_shift, create_threoretical_spectrum},
 };
-
-/// +/- m/z shift for the y' calculation.
-const MZ_SHIFT: u8 = 75;
 
 // pub trait IsXcorr {
 //     fn config(&self) -> &Configuration;
@@ -138,7 +132,7 @@ impl Xcorr<'_> {
             .iter()
             .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
 
-        let shift = (MZ_SHIFT as f64 / config.bin_size) as usize;
+        let shift = calculate_number_of_bins_to_shift(config.bin_size);
         let binned_experimental_spectrum = experimental_spectrum_binning(
             &filtered_experimental_spectrum.0,
             &filtered_experimental_spectrum.1,

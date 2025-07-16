@@ -2,7 +2,9 @@ use ndarray::Array1;
 use rustyms::{
     fragment::FragmentType,
     system::{e, usize::Charge},
-    CompoundPeptidoformIon, FragmentationModel, MassMode,
+    CompoundPeptidoformIon,
+    Element::H as Hydrogen,
+    FragmentationModel, MassMode,
 };
 
 use crate::error::Error;
@@ -19,6 +21,17 @@ const MZ_SHIFT: f64 = 75.0;
 pub fn mass_to_charge_to_dalton(mz: f64, charge: usize) -> f64 {
     let charge = charge as f64;
     mz * charge - Hydrogen.mass(None).unwrap().value * charge
+}
+
+/// Da to m/z conversion
+///
+/// # Arguments
+/// * `mass` - Mass in Dalton
+/// * `charge` - Charge state
+///
+pub fn dalton_to_mass_to_charge(mass: f64, charge: usize) -> f64 {
+    let charge = charge as f64;
+    (mass + Hydrogen.mass(None).unwrap().value * charge) / charge
 }
 
 /// Calculates the number of bins for the spectrum shift of y'

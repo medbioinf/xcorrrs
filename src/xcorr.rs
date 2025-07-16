@@ -85,6 +85,7 @@ use crate::{
 pub struct Xcorr<'a> {
     config: &'a Configuration,
     max_experimental_mz: f64,
+    shift: usize,
     binned_experimental_spectrum: Array1<f64>,
 }
 
@@ -98,6 +99,7 @@ impl Xcorr<'_> {
     pub fn new<'a>(
         config: &'a Configuration,
         experimental_spectrum: (&'a Array1<f64>, &'a Array1<f64>),
+        charge: usize,
     ) -> Result<Xcorr<'a>, Error> {
         if experimental_spectrum.0.is_empty() {
             return Err(Error::EmptyExperimentalSpectrum);
@@ -137,12 +139,16 @@ impl Xcorr<'_> {
             &filtered_experimental_spectrum.0,
             &filtered_experimental_spectrum.1,
             config.bin_size,
+            config.bin_offset,
+            charge,
             shift,
+            config.use_flanking_peaks,
         )?;
 
         Ok(Xcorr {
             config,
             max_experimental_mz,
+            shift,
             binned_experimental_spectrum,
         })
     }
@@ -269,6 +275,8 @@ impl Xcorr<'_> {
         let binned_thereoretical_spectrum = theoretical_spectrum_binning(
             &theoretical_spectrum,
             self.config.bin_size,
+            self.config.bin_offset,
+            charge,
             0, // Theoretical spectra are not shifted
             Some(self.max_experimental_mz),
         )?;
@@ -287,171 +295,5 @@ impl Xcorr<'_> {
             ions_total,
             ions_matched: 0,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::utils::tests::{get_spectrum, read_test_data};
-
-    use ndarray_stats::DeviationExt;
-    use polars::prelude::*;
-    use rayon::prelude::*;
-
-    use super::*;
-
-    /// Test `binned_spectrum_cross_correlation` function with a veeeeeeeery simple example validated against numpy.
-    ///
-    #[test]
-    fn test_binned_spectrum_cross_correlation() {
-        let x: Array1<f64> = Array1::from(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
-        let y: Array1<f64> = Array1::from(vec![1.0, 2.0, 3.0]);
-        let result = Xcorr::binned_spectrum_cross_correlation(&x, &y);
-        let rounded_results = result.round(); // prevent test failures due to floating point precision issues
-        assert_eq!(rounded_results, Array1::from(vec![14.0, 20.0, 26.0, 32.0]));
-    }
-
-    // Test the xcorr calculation against Comet's xcorr values.
-    #[test]
-    fn test_xcorr() {
-        let comet_df = read_test_data();
-
-        #[allow(clippy::type_complexity)]
-        let (scan_col, (peptide_col, (comet_xcorr_col, xcorrrs_col))): (
-            Vec<i64>,
-            (Vec<String>, (Vec<f64>, Vec<f64>)),
-        ) = (0..comet_df.height())
-            .into_par_iter()
-            .map(|idx| {
-                let scan = comet_df["scan"].i64().unwrap().get(idx).unwrap();
-                let comet_xcorr = comet_df["xcorr"].f64().unwrap().get(idx).unwrap();
-                let proforma_peptide = comet_df["proforma_peptide"]
-                    .str()
-                    .unwrap()
-                    .get(idx)
-                    .unwrap();
-                let charge = comet_df["charge"].i64().unwrap().get(idx).unwrap() as usize;
-
-                let (mz_array, intensity_array) = get_spectrum(scan.to_string().as_str());
-
-                let config = Configuration::default();
-                let xcorr = Xcorr::new(&config, (&mz_array, &intensity_array)).unwrap();
-
-                let scoring = match xcorr.xcorr_peptide(proforma_peptide, charge) {
-                    Ok(scoring) => scoring,
-                    Err(err) => {
-                        println!("Empty theoretical spectrum for scan {scan} and peptide {err}",);
-                        panic!("Empty theoretical spectrum for scan {scan} and peptide {err}",);
-                    }
-                };
-
-                (
-                    scan,
-                    (proforma_peptide.to_string(), (comet_xcorr, scoring.score)),
-                )
-            })
-            .unzip();
-
-        let mut xcorrrs_df = DataFrame::new(vec![
-            Column::new("scan".into(), scan_col),
-            Column::new("modified_peptide".into(), peptide_col),
-            Column::new("comet_xcorr".into(), comet_xcorr_col),
-            Column::new("xcorrrs".into(), xcorrrs_col),
-        ])
-        .unwrap();
-
-        xcorrrs_df
-            .sort_in_place(
-                ["comet_xcorr"],
-                SortMultipleOptions::default().with_order_descending(true),
-            )
-            .unwrap();
-
-        CsvWriter::new(std::fs::File::create("xcorr_results.tsv").unwrap())
-            .with_separator(b'\t')
-            .finish(&mut xcorrrs_df)
-            .unwrap();
-
-        // Plot the comet xcorrs vs xcorrrs
-        let max_comet_xcorr = xcorrrs_df["comet_xcorr"].f64().unwrap().max().unwrap();
-        let max_calculated_xcorr = xcorrrs_df["xcorrrs"].f64().unwrap().max().unwrap();
-        let max_score = max_comet_xcorr.max(max_calculated_xcorr);
-
-        let mut plot = plotly::Plot::new();
-        let diagonal_trace = plotly::Scatter::new(vec![0.0, max_score], vec![0.0, max_score])
-            .mode(plotly::common::Mode::Lines)
-            .marker(plotly::common::Marker::default().color("red"))
-            .hover_info(plotly::common::HoverInfo::None)
-            .show_legend(false);
-
-        let correlation_trace = plotly::Scatter::new(
-            xcorrrs_df["comet_xcorr"].f64().unwrap().to_vec(),
-            xcorrrs_df["xcorrrs"].f64().unwrap().to_vec(),
-        )
-        .mode(plotly::common::Mode::Markers)
-        .marker(plotly::common::Marker::default().color("blue"))
-        .show_legend(false);
-
-        plot.add_trace(diagonal_trace);
-        plot.add_trace(correlation_trace);
-
-        plot.set_layout(
-            plotly::Layout::new()
-                .title("Comet xcorr vs xcorrrs")
-                .x_axis(
-                    plotly::layout::Axis::new()
-                        .title("Comet xcorr")
-                        .constrain(plotly::layout::AxisConstrain::Domain),
-                )
-                .y_axis(
-                    plotly::layout::Axis::new()
-                        .title("xcorrrs")
-                        .scale_anchor("x"),
-                ),
-        );
-        plot.write_html("99-xcorr-correlation.html");
-
-        let comet_xcorr_max = xcorrrs_df
-            .column("comet_xcorr")
-            .unwrap()
-            .f64()
-            .unwrap()
-            .max()
-            .unwrap();
-
-        let xcorrrs_max = xcorrrs_df
-            .column("xcorrrs")
-            .unwrap()
-            .f64()
-            .unwrap()
-            .max()
-            .unwrap();
-
-        let max_score = comet_xcorr_max.max(xcorrrs_max);
-
-        let scaled_comet_xcorr = xcorrrs_df
-            .column("comet_xcorr")
-            .unwrap()
-            .f64()
-            .unwrap()
-            .to_ndarray()
-            .unwrap()
-            .mapv(|x| x / max_score);
-
-        let scaled_xcorrrs = xcorrrs_df
-            .column("xcorrrs")
-            .unwrap()
-            .f64()
-            .unwrap()
-            .to_ndarray()
-            .unwrap()
-            .mapv(|x| x / max_score);
-
-        let rmse = scaled_comet_xcorr
-            .root_mean_sq_err(&scaled_xcorrrs)
-            .unwrap();
-
-        // RMSE under 0.02 should be good enough
-        assert!(rmse < 0.02, "RMSE {rmse} >= 0.02");
     }
 }

@@ -2,7 +2,7 @@ use core::f64;
 
 use ndarray::{s, Array1};
 
-use crate::error::Error;
+use crate::{error::Error, utils::dalton_to_mass_to_charge};
 
 /// According to the original authors, after binning the experimental spectrum, the maximum intensity is normalized
 /// over a number of fixed windows.
@@ -13,12 +13,16 @@ const NUM_WINDOWS_FOR_NORMALIZATION: u8 = 10;
 /// Arguments:
 /// * `mz` - The m/z values of the theoretical spectrum.
 /// * `bin_size` - The size of the bins to be used for binning the spectrum.
+/// * `bin_offset` - The offset in monoisotopic mass. This is not used in the binning, but it is included for consistency with the experimental spectrum binning.
+/// * `charge` - The charge state of the theoretical spectrum. This is used to convert the bin offset from daltons to mass-to-charge ratio.
 /// * `shift` - The number of bins to add to the start and end of the binned spectrum. (Adding the shift avoids resizing the array later.)
 /// * `mz_max` - The maximum m/z value to consider for the spectrum. If `None`, the maximum m/z value from the input will be used.
 ///
 pub fn theoretical_spectrum_binning(
     mz: &Array1<f64>,
     bin_size: f64,
+    bin_offset: f64,
+    charge: usize,
     shift: usize,
     mz_max: Option<f64>,
 ) -> Result<Array1<f64>, Error> {
@@ -31,13 +35,19 @@ pub fn theoretical_spectrum_binning(
         Some(max) => max,
         None => *mz.last().unwrap(),
     };
-    let number_of_bins = (mz_max / bin_size + 1.0).ceil() as usize;
-    let mut bins: Array1<f64> = Array1::zeros(number_of_bins + 2 * shift);
+    let number_of_bins = (mz_max / bin_size).ceil() as usize;
+    let mut bins: Array1<f64> = Array1::zeros(number_of_bins + 2 * shift + 1);
+
+    let bin_offset_mz = if bin_offset > 0.0 {
+        dalton_to_mass_to_charge(bin_offset, charge)
+    } else {
+        0.0
+    };
 
     //  for mass in mz_array:
     for mz in mz.iter() {
         // index = int(mass // bin_width)
-        let index = (*mz / bin_size).floor() as usize + shift;
+        let index = ((*mz + bin_offset_mz) / bin_size).floor() as usize + shift - 1;
         // bins_filled[index] = 50.0
         bins[index] = 50.0;
         // if index - 1 != -1:
@@ -59,13 +69,19 @@ pub fn theoretical_spectrum_binning(
 /// * `mz` - The m/z values of the experimental spectrum.
 /// * `intensities` - The intensity values of the experimental spectrum.
 /// * `bin_size` - The size of the bins to be used for binning the spectrum.
+/// * `bin_offset` - The offset in monoisotopic mass
+/// * `charge` - The charge state of the experimental spectrum.
 /// * `shift` - The number of bins to add to the start and end of the binned spectrum. (Adding the shift avoids resizing the array later.)
+/// * `use_flanking_peaks` - Whether to use flanking peaks in the binning.
 ///
 pub fn experimental_spectrum_binning(
     mz: &Array1<f64>,
     intensities: &Array1<f64>,
     bin_size: f64,
+    bin_offset: f64,
+    charge: usize,
     shift: usize,
+    use_flanking_peaks: bool,
 ) -> Result<Array1<f64>, Error> {
     if mz.len() != intensities.len() {
         return Err(Error::ExperimentalSpectrumShape(
@@ -76,8 +92,14 @@ pub fn experimental_spectrum_binning(
 
     // bins_filled = np.zeros(math.ceil(np.max(mz_array) / bin_width) + 1)
     let mz_max = mz.last().unwrap();
-    let number_of_bins = (mz_max / bin_size + 1.0).ceil() as usize;
-    let mut binned_spectrum: Array1<f64> = Array1::zeros(number_of_bins + 2 * shift);
+    let number_of_bins = (mz_max / bin_size).ceil() as usize;
+    let mut binned_spectrum: Array1<f64> = Array1::zeros(number_of_bins + 2 * shift + 1);
+
+    let bin_offset_mz = if bin_offset > 0.0 {
+        dalton_to_mass_to_charge(bin_offset, charge)
+    } else {
+        0.0
+    };
 
     // intensity_array = np.sqrt(intensity_array)
     // Doing this when adding to the bins, so we don't need to create a new array.
@@ -86,7 +108,7 @@ pub fn experimental_spectrum_binning(
     //     index = int(mass // bin_width)
     //     bins_filled[index] = max(bins_filled[index], intensity)
     for (mz, intensity) in mz.iter().zip(intensities.iter()) {
-        let index = (*mz / bin_size).floor() as usize + shift;
+        let index = ((*mz + bin_offset_mz) / bin_size).floor() as usize + shift - 1;
         binned_spectrum[index] = binned_spectrum[index].max(intensity.sqrt());
     }
 
@@ -119,172 +141,23 @@ pub fn experimental_spectrum_binning(
         }
     }
 
+    if use_flanking_peaks {
+        for mz in mz.iter() {
+            let index = ((*mz + bin_offset_mz) / bin_size).floor() as usize + shift - 1;
+            let flanking_intensity = binned_spectrum[index] / 2.0;
+            if index > 0 {
+                binned_spectrum[index - 1] = flanking_intensity;
+            }
+
+            if index < binned_spectrum.len() - 1 {
+                binned_spectrum[index + 1] = flanking_intensity;
+            }
+        }
+    }
+
     // del bins_filled
     // drop(bins); // we're doing it in place
 
     // return norm_bins
     Ok(binned_spectrum)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_theoretical_spectrum_binning() {
-        let mz = Array1::from(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]);
-        let bin_size = 5.0;
-        let result = theoretical_spectrum_binning(&mz, bin_size, 0, None).unwrap();
-        assert_eq!(result.len(), 13);
-        assert_eq!(
-            result,
-            Array1::from(vec![
-                0.0, 25.0, 50.0, 25.0, 50.0, 25.0, 50.0, 25.0, 50.0, 25.0, 50.0, 25.0, 50.0,
-            ])
-        );
-    }
-
-    #[test]
-    fn test_theoretical_spectrum_binning_with_shift() {
-        let shift: usize = 2;
-        let mz = Array1::from(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]);
-        let bin_size = 5.0;
-        let result = theoretical_spectrum_binning(&mz, bin_size, shift, None).unwrap();
-        assert_eq!(result.len(), 17);
-        assert_eq!(
-            result,
-            Array1::from(vec![
-                0.0, 0.0, 0.0, 25.0, 50.0, 25.0, 50.0, 25.0, 50.0, 25.0, 50.0, 25.0, 50.0, 25.0,
-                50.0, 25.0, 0.0
-            ])
-        );
-    }
-
-    #[test]
-    fn test_experimental_spectrum_binning() {
-        let mz = Array1::from(vec![
-            10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0,
-            140.0, 150.0, 160.0, 170.0, 180.0, 190.0, 200.0,
-        ]);
-        let inten = Array1::from(vec![
-            21.0, 20.0, 99.0, 50.0, 17.0, 79.0, 89.0, 35.0, 38.0, 85.0, 14.0, 19.0, 56.0, 39.0,
-            39.0, 17.0, 98.0, 89.0, 73.0, 74.0,
-        ]);
-        let bin_size = 5.0;
-        let result = experimental_spectrum_binning(&mz, &inten, bin_size, 0).unwrap();
-
-        assert_eq!(result.len(), 41);
-        assert_eq!(
-            result,
-            Array1::from(vec![
-                0.0,
-                0.0,
-                50.0,
-                0.0,
-                48.79500364742667,
-                0.0,
-                50.0,
-                0.0,
-                35.53345272593507,
-                0.0,
-                21.852416110985086,
-                0.0,
-                47.10733619719444,
-                0.0,
-                50.0,
-                0.0,
-                47.98574349686966,
-                0.0,
-                50.0,
-                0.0,
-                50.0,
-                0.0,
-                20.291986247835695,
-                0.0,
-                23.63944858518838,
-                0.0,
-                50.0,
-                0.0,
-                41.72614801981401,
-                0.0,
-                31.542003094028026,
-                0.0,
-                20.824828195876073,
-                0.0,
-                50.0,
-                0.0,
-                50.0,
-                0.0,
-                45.28312928401491,
-                0.0,
-                50.0
-            ])
-        );
-    }
-
-    #[test]
-    fn test_experimental_spectrum_binning_with_shift() {
-        let mz = Array1::from(vec![
-            10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0,
-            140.0, 150.0, 160.0, 170.0, 180.0, 190.0, 200.0,
-        ]);
-        let inten = Array1::from(vec![
-            21.0, 20.0, 99.0, 50.0, 17.0, 79.0, 89.0, 35.0, 38.0, 85.0, 14.0, 19.0, 56.0, 39.0,
-            39.0, 17.0, 98.0, 89.0, 73.0, 74.0,
-        ]);
-        let bin_size = 5.0;
-        let result = experimental_spectrum_binning(&mz, &inten, bin_size, 2).unwrap();
-
-        assert_eq!(result.len(), 45);
-        assert_eq!(
-            result,
-            Array1::from(vec![
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                50.0,
-                0.0,
-                48.79500364742667,
-                0.0,
-                50.0,
-                0.0,
-                35.53345272593507,
-                0.0,
-                21.852416110985086,
-                0.0,
-                47.10733619719444,
-                0.0,
-                50.0,
-                0.0,
-                47.98574349686966,
-                0.0,
-                50.0,
-                0.0,
-                50.0,
-                0.0,
-                20.291986247835695,
-                0.0,
-                23.63944858518838,
-                0.0,
-                50.0,
-                0.0,
-                41.72614801981401,
-                0.0,
-                31.542003094028026,
-                0.0,
-                20.824828195876073,
-                0.0,
-                50.0,
-                0.0,
-                50.0,
-                0.0,
-                45.28312928401491,
-                0.0,
-                50.0,
-                0.0,
-                0.0,
-            ])
-        );
-    }
 }

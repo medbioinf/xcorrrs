@@ -176,6 +176,27 @@ impl FastXcorr<'_> {
         )?;
         let ions_total = theoretical_spectrum.len();
 
+        let bin_offset_mz = if self.config.bin_offset > 0.0 {
+            crate::utils::dalton_to_mass_to_charge(self.config.bin_offset, charge)
+        } else {
+            0.0
+        };
+        let ions_matched = self
+            .filtered_experimental_spectrum
+            .0
+            .iter()
+            .zip(self.filtered_experimental_spectrum.1.iter())
+            .map(|(&mz, &intensity)| {
+                let index =
+                    ((mz + bin_offset_mz) / self.config.bin_size).floor() as usize + self.shift - 1;
+                if self.y_prime[index] > 0.0 && intensity > 0.0 {
+                    1
+                } else {
+                    0
+                }
+            })
+            .sum();
+
         let binned_thereoretical_spectrum = theoretical_spectrum_binning(
             &theoretical_spectrum,
             self.config.bin_size,
@@ -214,7 +235,7 @@ impl FastXcorr<'_> {
             min_theoretical_mass,
             max_theoretical_mass,
             ions_total,
-            ions_matched: 0,
+            ions_matched,
         })
     }
 }

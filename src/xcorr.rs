@@ -282,6 +282,21 @@ impl Xcorr<'_> {
         )?;
         drop(theoretical_spectrum);
 
+        let ions_matched = self
+            .binned_experimental_spectrum
+            .slice(s![
+                self.shift..self.binned_experimental_spectrum.len() - self.shift
+            ])
+            .iter()
+            .zip(binned_thereoretical_spectrum.iter())
+            .fold(0_usize, |count, (experimental_peak, theoretical_peak)| {
+                if *experimental_peak <= 0.0 || *theoretical_peak <= 0.0 {
+                    count
+                } else {
+                    count + 1
+                }
+            });
+
         // Score
         let score = Self::xcorr_binned_spectrum(
             &self.binned_experimental_spectrum,
@@ -293,7 +308,7 @@ impl Xcorr<'_> {
             min_theoretical_mass,
             max_theoretical_mass,
             ions_total,
-            ions_matched: 0,
+            ions_matched,
         })
     }
 }

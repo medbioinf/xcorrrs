@@ -71,6 +71,8 @@ pub fn create_threoretical_spectrum(
 
 #[cfg(test)]
 pub mod tests {
+    use crate::configuration::Configuration;
+
     use super::*;
     use std::path::PathBuf;
 
@@ -82,6 +84,27 @@ pub mod tests {
             mass_to_charge_to_dalton(464.888129195412, 3),
             1391.640912490542
         )
+    }
+
+    /// Just a sanity check to make sure that max charge is uses as is in rustyms
+    #[test]
+    fn test_fragment_creation() {
+        let max_charge = 6;
+        let config = Configuration::default();
+        let peptide = CompoundPeptidoformIon::pro_forma("DIGSETK", None).unwrap();
+
+        let mut charge_states = vec![false; max_charge + 1];
+        charge_states[0] = true; // Charge 0 is not valid, but we use it for indexing
+
+        peptide
+            .generate_theoretical_fragments(
+                Charge::new::<e>(max_charge),
+                &config.fragmentation_model,
+            )
+            .iter()
+            .for_each(|f| charge_states[f.charge.value] = true);
+
+        assert!(charge_states.iter().all(|x| *x));
     }
 
     /// Reads the test data from a TSV file and processes it to include a new column for proforma peptides.

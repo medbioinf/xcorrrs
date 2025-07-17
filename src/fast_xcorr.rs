@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use ndarray::{s, Array1, Axis};
 use rustyms::CompoundPeptidoformIon;
 

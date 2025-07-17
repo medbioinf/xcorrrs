@@ -226,22 +226,6 @@ impl FastXcorr<'_> {
 
         drop(theoretical_spectrum);
 
-        let file = std::fs::File::create("fast_xcorr_theo_vs_y_prime.tsv").unwrap();
-        let mut writer = std::io::BufWriter::new(file);
-        writer
-            .write_all("index\txcorr\ttheoretical\n".as_bytes())
-            .unwrap();
-        for (idx, (y, exp)) in self
-            .y_prime
-            .iter()
-            .zip(&binned_thereoretical_spectrum)
-            .enumerate()
-        {
-            writer
-                .write_all(format!("{idx}\t{y}\t{exp}\n").as_bytes())
-                .unwrap();
-        }
-
         // Score
         let score = Self::xcorr_binned_spectrum(&binned_thereoretical_spectrum, &self.y_prime);
 

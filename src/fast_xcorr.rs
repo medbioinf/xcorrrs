@@ -13,8 +13,10 @@ use crate::{
 
 pub struct FastXcorr<'a> {
     config: &'a Configuration,
+    charge: usize,
     filtered_experimental_spectrum: (Array1<f64>, Array1<f64>),
     max_experimental_mz: f64,
+    fragment_charge: usize,
     shift: usize,
     y_prime: Array1<f64>,
 }
@@ -76,10 +78,17 @@ impl FastXcorr<'_> {
 
         let y_prime = Self::calc_y_prime(&binned_experimental_spectrum, shift);
 
+        let mut fragment_charge = (charge - 1).max(1);
+        if fragment_charge > config.max_fragment_charge {
+            fragment_charge = config.max_fragment_charge;
+        }
+
         Ok(FastXcorr {
             config,
+            charge,
             filtered_experimental_spectrum,
             max_experimental_mz,
+            fragment_charge,
             shift,
             y_prime,
         })
@@ -147,13 +156,38 @@ impl FastXcorr<'_> {
         binned_theoretical_spectrum.dot(y_prime) / 10000.0
     }
 
+    pub fn create_threoretical_spectrum(
+        &self,
+        peptide: &CompoundPeptidoformIon,
+    ) -> Result<Array1<f64>, Error> {
+        create_threoretical_spectrum(
+            peptide,
+            &self.config.fragmentation_model,
+            self.fragment_charge,
+            self.max_experimental_mz,
+        )
+    }
+
+    pub fn theoretical_spectrum_binning(
+        &self,
+        theoretical_spectrum: &Array1<f64>,
+    ) -> Result<Array1<f64>, Error> {
+        theoretical_spectrum_binning(
+            theoretical_spectrum,
+            self.config.bin_size,
+            self.config.bin_offset,
+            self.charge,
+            self.shift,
+            Some(self.max_experimental_mz),
+        )
+    }
+
     /// Calculates the xcorr between a peptide and the experimental spectrum
     ///
     /// # Arguments
     /// * `peptide` - The peptide sequence to score.
-    /// * `charge` - Charge states to use for scoring. If not provided, the configuration's charge states are used.
     ///
-    pub fn xcorr_peptide(&self, peptide: &str, charge: usize) -> Result<ScoringResult, Error> {
+    pub fn xcorr_peptide(&self, peptide: &str) -> Result<ScoringResult, Error> {
         let peptide = CompoundPeptidoformIon::pro_forma(peptide, None)
             .map_err(Error::InvalidPeptideSequence)?;
 
@@ -163,21 +197,11 @@ impl FastXcorr<'_> {
                 None => (-1.0, -1.0),
             };
 
-        let mut fragment_charge = (charge - 1).max(1);
-        if fragment_charge > self.config.max_fragment_charge {
-            fragment_charge = self.config.max_fragment_charge;
-        }
-
-        let theoretical_spectrum = create_threoretical_spectrum(
-            &peptide,
-            &self.config.fragmentation_model,
-            fragment_charge,
-            self.max_experimental_mz,
-        )?;
+        let theoretical_spectrum = self.create_threoretical_spectrum(&peptide)?;
         let ions_total = theoretical_spectrum.len();
 
         let bin_offset_mz = if self.config.bin_offset > 0.0 {
-            crate::utils::dalton_to_mass_to_charge(self.config.bin_offset, charge)
+            crate::utils::dalton_to_mass_to_charge(self.config.bin_offset, self.charge)
         } else {
             0.0
         };
@@ -197,14 +221,8 @@ impl FastXcorr<'_> {
             })
             .sum();
 
-        let binned_thereoretical_spectrum = theoretical_spectrum_binning(
-            &theoretical_spectrum,
-            self.config.bin_size,
-            self.config.bin_offset,
-            charge,
-            self.shift,
-            Some(self.max_experimental_mz),
-        )?;
+        let binned_thereoretical_spectrum =
+            self.theoretical_spectrum_binning(&theoretical_spectrum)?;
 
         drop(theoretical_spectrum);
 

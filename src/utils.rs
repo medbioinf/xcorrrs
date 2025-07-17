@@ -175,6 +175,71 @@ pub mod tests {
         (mz_array, intensity_array)
     }
 
+    /// Reads the experimental spectrum Eng provided for the peptide DIGSETK.
+    ///
+    pub fn get_eng_experimental_spectrum() -> (Array1<f64>, Array1<f64>) {
+        let spec_df =
+            ParquetReader::new(std::fs::File::open("test_files/eng/DIGSETK.parquet").unwrap())
+                .read_parallel(ParallelStrategy::None)
+                .finish()
+                .unwrap();
+
+        let mz_array = spec_df["mz"]
+            .f64()
+            .unwrap()
+            .to_ndarray()
+            .unwrap()
+            .to_owned();
+
+        let intensity_array = spec_df["intensity"]
+            .f64()
+            .unwrap()
+            .to_ndarray()
+            .unwrap()
+            .to_owned();
+
+        (mz_array, intensity_array)
+    }
+
+    /// Reads the partial xcorr spectrum and the index provided by Eng.
+    /// Return is a tuple with the index and the fast xcorr values.
+    ///
+    pub fn get_eng_fast_xcorr_spectrum() -> (Array1<usize>, Array1<f64>) {
+        let spec_df = CsvReadOptions::default()
+            .with_has_header(true)
+            .with_rechunk(true)
+            .with_parse_options(
+                CsvParseOptions::default()
+                    .with_separator(b'\t')
+                    .with_comment_prefix(Some("#")),
+            )
+            .try_into_reader_with_file_path(Some(PathBuf::from(
+                "test_files/eng/DIGSETK.process.tsv",
+            )))
+            .unwrap()
+            .finish()
+            .unwrap();
+
+        (
+            spec_df
+                .column("index")
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_ndarray()
+                .unwrap()
+                .mapv(|x| x as usize),
+            spec_df
+                .column("fast_xcorr")
+                .unwrap()
+                .f64()
+                .unwrap()
+                .to_ndarray()
+                .unwrap()
+                .to_owned(),
+        )
+    }
+
     /// Extracts spectru, data arrays from the mzML file and saves them as Parquet files without any further metadata
     /// Important do not set TEST_NUMBER_OF_PSMS environment variable, as this will limit the spectrum extraction to a certain number of scans.
     ///

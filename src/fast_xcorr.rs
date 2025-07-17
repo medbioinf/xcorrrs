@@ -241,3 +241,56 @@ impl FastXcorr<'_> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::utils::tests::{get_eng_experimental_spectrum, get_eng_fast_xcorr_spectrum};
+
+    use ndarray::Slice;
+
+    use super::*;
+
+    // Test
+    #[test]
+    fn test_y_prime() {
+        let expected_xcorr_spec = get_eng_fast_xcorr_spectrum();
+
+        // Create config  for low resolution data
+        let config = Configuration {
+            bin_size: 1.0005,
+            bin_offset: 0.4,
+            ..Configuration::default()
+        };
+
+        let experimental_spectrum = get_eng_experimental_spectrum();
+
+        let xcorr = FastXcorr::new(
+            &config,
+            (&experimental_spectrum.0, &experimental_spectrum.1),
+            1,
+        )
+        .unwrap();
+
+        let mut rouneded_xcorr_sped = xcorr
+            .y_prime
+            .iter()
+            .map(|x| (x * 100.0).round() / 100.0)
+            .collect::<Array1<f64>>();
+
+        // Remove the front shift
+        rouneded_xcorr_sped.slice_axis_inplace(Axis(0), Slice::new(xcorr.shift as isize, None, 1));
+
+        // Just select the values that are in the expected spectrum from Eng
+        rouneded_xcorr_sped =
+            rouneded_xcorr_sped.select(Axis(0), expected_xcorr_spec.0.as_slice().unwrap());
+
+        let rounded_expeced_xcorr_spec = expected_xcorr_spec
+            .1
+            .iter()
+            .map(|x| (x * 100.0).round() / 100.0)
+            .collect::<Array1<f64>>();
+
+        assert_eq!(rouneded_xcorr_sped, rounded_expeced_xcorr_spec)
+    }
+}

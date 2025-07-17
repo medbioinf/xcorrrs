@@ -133,7 +133,7 @@ impl Default for Configuration {
     fn default() -> Self {
         Self::new(
             0.02,
-            0.4,
+            0.0,
             FragmentationMethod::CID,
             true,
             vec![Ion::B, Ion::Y],

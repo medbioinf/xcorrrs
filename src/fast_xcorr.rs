@@ -242,10 +242,12 @@ impl FastXcorr<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::{env, io::Write};
 
     use crate::utils::tests::{get_eng_experimental_spectrum, get_eng_fast_xcorr_spectrum};
 
     use ndarray::Slice;
+    use polars::prelude::*;
 
     use super::*;
 
@@ -290,5 +292,77 @@ mod tests {
             .collect::<Array1<f64>>();
 
         assert_eq!(rouneded_xcorr_sped, rounded_expeced_xcorr_spec)
+    }
+
+    /// Tests the xcorr calculation againstdata provided by the J. Eng
+    ///
+    #[test]
+    fn test_xcorr_eng_data() {
+        // Load experimental spectrum from Parquet file
+        let experimental_spectrum =
+            ParquetReader::new(std::fs::File::open("test_files/eng/DIGSETK.parquet").unwrap())
+                .read_parallel(ParallelStrategy::None)
+                .finish()
+                .unwrap();
+
+        let experimental_spectrum = (
+            experimental_spectrum["mz"]
+                .f64()
+                .unwrap()
+                .to_ndarray()
+                .unwrap()
+                .to_owned(),
+            experimental_spectrum["intensity"]
+                .f64()
+                .unwrap()
+                .to_ndarray()
+                .unwrap()
+                .to_owned(),
+        );
+
+        let config = Configuration {
+            bin_size: 1.0005,
+            bin_offset: 0.4,
+            use_flanking_peaks: true,
+            ..Configuration::default()
+        };
+
+        let xcorr = FastXcorr::new(
+            &config,
+            (&experimental_spectrum.0, &experimental_spectrum.1),
+            1,
+        )
+        .unwrap();
+
+        if env::var("VERBOSE").is_ok() {
+            let peptide = CompoundPeptidoformIon::pro_forma("DIGSETK", None).unwrap();
+            let binned_theoretical_spectrum = xcorr
+                .theoretical_spectrum_binning(
+                    &xcorr.create_threoretical_spectrum(&peptide).unwrap(),
+                )
+                .unwrap();
+
+            let output_file =
+                std::fs::File::create("DIGSETK__fast_xcorr_bin___theoretical_bin.tsv").unwrap();
+            let mut output_writer = std::io::BufWriter::new(output_file);
+
+            let _ = output_writer
+                .write("bin\texperimental_bin\ttheoretical_bin\n".as_bytes())
+                .unwrap();
+            for (idx, (fast_xcorr_bin, theoretical_bin)) in xcorr
+                .y_prime
+                .iter()
+                .zip(binned_theoretical_spectrum.iter())
+                .enumerate()
+            {
+                let _ = output_writer
+                    .write(format!("{idx}\t{fast_xcorr_bin}\t{theoretical_bin}\n").as_bytes())
+                    .unwrap();
+            }
+        }
+
+        let scoring = xcorr.xcorr_peptide("DIGSETK").unwrap();
+        println!("{scoring}");
+        assert_eq!((scoring.score * 100.0).round() / 100.0, 2.92);
     }
 }

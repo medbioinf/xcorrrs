@@ -144,7 +144,7 @@ impl Xcorr<'_> {
             config.bin_offset,
             charge,
             shift,
-            config.use_flanking_peaks,
+            false, // The original xcorr applied the flanking peaks to the theoretical spectrum,
         )?;
 
         let mut fragment_charge = (charge - 1).max(1);
@@ -234,6 +234,7 @@ impl Xcorr<'_> {
             self.charge,
             0, // Theoretical spectra are not shifted
             Some(self.max_experimental_mz),
+            self.config.use_flanking_peaks,
         )
     }
 

@@ -17,6 +17,7 @@ const NUM_WINDOWS_FOR_NORMALIZATION: u8 = 10;
 /// * `charge` - The charge state of the theoretical spectrum. This is used to convert the bin offset from daltons to mass-to-charge ratio.
 /// * `shift` - The number of bins to add to the start and end of the binned spectrum. (Adding the shift avoids resizing the array later.)
 /// * `mz_max` - The maximum m/z value to consider for the spectrum. If `None`, the maximum m/z value from the input will be used.
+/// * `use_flanking_peaks` - Whether to use flanking peaks in the binning.
 ///
 pub fn theoretical_spectrum_binning(
     mz: &Array1<f64>,
@@ -25,6 +26,7 @@ pub fn theoretical_spectrum_binning(
     charge: usize,
     shift: usize,
     mz_max: Option<f64>,
+    use_flanking_peaks: bool,
 ) -> Result<Array1<f64>, Error> {
     if mz.is_empty() {
         return Err(Error::EmptyTheoreticalSpectrum);
@@ -50,13 +52,16 @@ pub fn theoretical_spectrum_binning(
         let index = ((*mz + bin_offset_mz) / bin_size).floor() as usize + shift - 1;
         // bins_filled[index] = 50.0
         bins[index] = 50.0;
-        // if index - 1 != -1:
-        //     bins_filled[index - 1] = max(bins_filled[index - 1], 25.0)
-        if index > 0 {
-            bins[index - 1] = bins[index - 1].max(25.0);
-        }
-        if index + 1 < bins.len() {
-            bins[index + 1] = bins[index + 1].max(25.0);
+
+        if use_flanking_peaks {
+            // if index - 1 != -1:
+            //     bins_filled[index - 1] = max(bins_filled[index - 1], 25.0)
+            if index > 0 {
+                bins[index - 1] = bins[index - 1].max(25.0);
+            }
+            if index + 1 < bins.len() {
+                bins[index + 1] = bins[index + 1].max(25.0);
+            }
         }
     }
 

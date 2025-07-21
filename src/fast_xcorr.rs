@@ -177,6 +177,7 @@ impl FastXcorr<'_> {
             self.charge,
             self.shift,
             Some(self.max_experimental_mz),
+            false, // In the fast xcorr implementation the flanking peaks where "moved" to the experimental spectrum
         )
     }
 

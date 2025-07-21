@@ -251,7 +251,8 @@ mod tests {
 
     use super::*;
 
-    // Test
+    /// Checks the Xcorr spectrum (y-prime) against the data provided by Eng
+    ///
     #[test]
     fn test_y_prime() {
         let expected_xcorr_spec = get_eng_fast_xcorr_spectrum();
@@ -294,7 +295,7 @@ mod tests {
         assert_eq!(rouneded_xcorr_sped, rounded_expeced_xcorr_spec)
     }
 
-    /// Tests the xcorr calculation againstdata provided by the J. Eng
+    /// Tests the xcorr calculation against data provided by the J. Eng
     ///
     #[test]
     fn test_xcorr_eng_data() {

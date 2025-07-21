@@ -352,7 +352,7 @@ mod tests {
         assert_eq!(rounded_results, Array1::from(vec![14.0, 20.0, 26.0, 32.0]));
     }
 
-    /// Tests the xcorr calculation againstdata provided by the J. Eng
+    /// Tests the xcorr calculation against data provided by the J. Eng
     ///
     #[test]
     fn test_xcorr_eng_data() {

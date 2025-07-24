@@ -141,7 +141,6 @@ impl Xcorr<'_> {
             &filtered_experimental_spectrum.1,
             config.bin_size,
             config.bin_offset,
-            charge,
             false, // The original xcorr applied the flanking peaks to the theoretical spectrum,
         )?;
 
@@ -228,7 +227,6 @@ impl Xcorr<'_> {
             theoretical_spectrum,
             self.config.bin_size,
             self.config.bin_offset,
-            self.charge,
             Some(self.max_experimental_mz),
             self.config.use_flanking_peaks,
             false, // Theoretical spectra are not shifted

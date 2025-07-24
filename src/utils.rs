@@ -9,17 +9,6 @@ use rustyms::{
 
 use crate::error::Error;
 
-/// Converts mass to charge ration (Thompson) as Dalton
-///
-/// # Arguments
-/// * `mz` - Mass to charge ratio (Thompson)
-/// * `charge` - Charge
-///
-pub fn mass_to_charge_to_dalton(mz: f64, charge: usize) -> f64 {
-    let charge = charge as f64;
-    mz * charge - Hydrogen.mass(None).unwrap().value * charge
-}
-
 /// Da to m/z conversion
 ///
 /// # Arguments
@@ -65,14 +54,6 @@ pub mod tests {
     use std::path::PathBuf;
 
     use polars::{frame::DataFrame, prelude::*};
-
-    #[test]
-    fn test_mass_to_charge_ratio_to_dalton() {
-        assert_eq!(
-            mass_to_charge_to_dalton(464.888129195412, 3),
-            1391.640912490542
-        )
-    }
 
     /// Just a sanity check to make sure that max charge is uses as is in rustyms
     #[test]

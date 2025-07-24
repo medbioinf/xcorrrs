@@ -68,7 +68,6 @@ impl FastXcorr<'_> {
             &filtered_experimental_spectrum.1,
             config.bin_size,
             config.bin_offset,
-            charge,
             config.use_flanking_peaks,
         )?;
 
@@ -172,7 +171,6 @@ impl FastXcorr<'_> {
             theoretical_spectrum,
             self.config.bin_size,
             self.config.bin_offset,
-            self.charge,
             Some(self.max_experimental_mz),
             false, // In the fast xcorr implementation the flanking peaks where "moved" to the experimental spectrum
             true,
@@ -197,31 +195,21 @@ impl FastXcorr<'_> {
         let theoretical_spectrum = self.create_threoretical_spectrum(&peptide)?;
         let ions_total = theoretical_spectrum.len();
 
-        let bin_offset_mz = if self.config.bin_offset > 0.0 {
-            crate::utils::dalton_to_mass_to_charge(self.config.bin_offset, self.charge)
-        } else {
-            0.0
-        };
-        let ions_matched = self
-            .filtered_experimental_spectrum
-            .0
-            .iter()
-            .zip(self.filtered_experimental_spectrum.1.iter())
-            .map(|(&mz, &intensity)| {
-                let index =
-                    ((mz + bin_offset_mz) / self.config.bin_size).floor() as usize + self.shift - 1;
-                if self.y_prime[index] > 0.0 && intensity > 0.0 {
-                    1
-                } else {
-                    0
-                }
-            })
-            .sum();
-
         let binned_thereoretical_spectrum =
             self.theoretical_spectrum_binning(&theoretical_spectrum)?;
 
         drop(theoretical_spectrum);
+
+        let ions_matched = binned_thereoretical_spectrum
+            .iter()
+            .zip(self.y_prime.iter())
+            .fold(0, |acc, (&theoretical_bin, &y_prime_bin)| {
+                if theoretical_bin > 0.0 && y_prime_bin > 0.0 {
+                    acc + 1
+                } else {
+                    acc
+                }
+            });
 
         // Score
         let score = Self::xcorr_binned_spectrum(&binned_thereoretical_spectrum, &self.y_prime);

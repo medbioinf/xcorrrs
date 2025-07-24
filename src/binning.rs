@@ -1,8 +1,9 @@
 use core::f64;
 
 use ndarray::{s, Array1};
+use rustyms::Fragment;
 
-use crate::{error::Error, utils::dalton_to_mass_to_charge};
+use crate::{error::Error, utils::dalton_to_mass_to_charge, BIN_SHIFT};
 
 /// According to the original authors, after binning the experimental spectrum, the maximum intensity is normalized
 /// over a number of fixed windows.
@@ -15,18 +16,18 @@ const NUM_WINDOWS_FOR_NORMALIZATION: u8 = 10;
 /// * `bin_size` - The size of the bins to be used for binning the spectrum.
 /// * `bin_offset` - The offset in monoisotopic mass. This is not used in the binning, but it is included for consistency with the experimental spectrum binning.
 /// * `charge` - The charge state of the theoretical spectrum. This is used to convert the bin offset from daltons to mass-to-charge ratio.
-/// * `shift` - The number of bins to add to the start and end of the binned spectrum. (Adding the shift avoids resizing the array later.)
 /// * `mz_max` - The maximum m/z value to consider for the spectrum. If `None`, the maximum m/z value from the input will be used.
 /// * `use_flanking_peaks` - Whether to use flanking peaks in the binning.
+/// * `apply_shift` - Whether to apply the BIN_SHIFT to the binned spectrum
 ///
 pub fn theoretical_spectrum_binning(
     mz: &Array1<f64>,
     bin_size: f64,
     bin_offset: f64,
     charge: usize,
-    shift: usize,
     mz_max: Option<f64>,
     use_flanking_peaks: bool,
+    apply_shift: bool,
 ) -> Result<Array1<f64>, Error> {
     if mz.is_empty() {
         return Err(Error::EmptyTheoreticalSpectrum);
@@ -38,6 +39,7 @@ pub fn theoretical_spectrum_binning(
         None => *mz.last().unwrap(),
     };
     let number_of_bins = (mz_max / bin_size).ceil() as usize;
+    let shift = if apply_shift { BIN_SHIFT } else { 0 };
     let mut bins: Array1<f64> = Array1::zeros(number_of_bins + 2 * shift + 1);
 
     let bin_offset_mz = if bin_offset > 0.0 {
@@ -76,7 +78,6 @@ pub fn theoretical_spectrum_binning(
 /// * `bin_size` - The size of the bins to be used for binning the spectrum.
 /// * `bin_offset` - The offset in monoisotopic mass
 /// * `charge` - The charge state of the experimental spectrum.
-/// * `shift` - The number of bins to add to the start and end of the binned spectrum. (Adding the shift avoids resizing the array later.)
 /// * `use_flanking_peaks` - Whether to use flanking peaks in the binning.
 ///
 pub fn experimental_spectrum_binning(
@@ -85,7 +86,6 @@ pub fn experimental_spectrum_binning(
     bin_size: f64,
     bin_offset: f64,
     charge: usize,
-    shift: usize,
     use_flanking_peaks: bool,
 ) -> Result<Array1<f64>, Error> {
     if mz.len() != intensities.len() {
@@ -98,7 +98,7 @@ pub fn experimental_spectrum_binning(
     // bins_filled = np.zeros(math.ceil(np.max(mz_array) / bin_width) + 1)
     let mz_max = mz.last().unwrap();
     let number_of_bins = (mz_max / bin_size).ceil() as usize;
-    let mut binned_spectrum: Array1<f64> = Array1::zeros(number_of_bins + 2 * shift + 1);
+    let mut binned_spectrum: Array1<f64> = Array1::zeros(number_of_bins + 2 * BIN_SHIFT + 1);
 
     let bin_offset_mz = if bin_offset > 0.0 {
         dalton_to_mass_to_charge(bin_offset, charge)
@@ -113,7 +113,7 @@ pub fn experimental_spectrum_binning(
     //     index = int(mass // bin_width)
     //     bins_filled[index] = max(bins_filled[index], intensity)
     for (mz, intensity) in mz.iter().zip(intensities.iter()) {
-        let index = ((*mz + bin_offset_mz) / bin_size).floor() as usize + shift - 1;
+        let index = ((*mz + bin_offset_mz) / bin_size).floor() as usize + BIN_SHIFT - 1;
         binned_spectrum[index] = binned_spectrum[index].max(intensity.sqrt());
     }
 
@@ -133,7 +133,7 @@ pub fn experimental_spectrum_binning(
     //     if np.max(win) != 0:
     //         win = 50 * (win  / np.max(win))
     //     norm_bins = np.append(norm_bins, win)
-    let binned_spec_start = shift;
+    let binned_spec_start = BIN_SHIFT;
     let binned_spec_end = binned_spec_start + number_of_bins;
     for window_start in (binned_spec_start..binned_spec_end).step_by(windows_size) {
         let window_end = (window_start + windows_size).min(binned_spec_end);
@@ -148,7 +148,7 @@ pub fn experimental_spectrum_binning(
 
     if use_flanking_peaks {
         for mz in mz.iter() {
-            let index = ((*mz + bin_offset_mz) / bin_size).floor() as usize + shift - 1;
+            let index = ((*mz + bin_offset_mz) / bin_size).floor() as usize + BIN_SHIFT - 1;
             let flanking_intensity = binned_spectrum[index] / 2.0;
             if index > 0 {
                 binned_spectrum[index - 1] = flanking_intensity;

@@ -6,7 +6,8 @@ use crate::{
     configuration::Configuration,
     error::Error,
     scoring_result::ScoringResult,
-    utils::{calculate_number_of_bins_to_shift, create_threoretical_spectrum},
+    utils::create_threoretical_spectrum,
+    BIN_SHIFT,
 };
 
 pub struct FastXcorr<'a> {
@@ -15,7 +16,6 @@ pub struct FastXcorr<'a> {
     filtered_experimental_spectrum: (Array1<f64>, Array1<f64>),
     max_experimental_mz: f64,
     fragment_charge: usize,
-    shift: usize,
     y_prime: Array1<f64>,
 }
 
@@ -63,18 +63,16 @@ impl FastXcorr<'_> {
 
         let max_experimental_mz = *filtered_experimental_spectrum.0.last().unwrap();
 
-        let shift = calculate_number_of_bins_to_shift(config.bin_size);
         let binned_experimental_spectrum = experimental_spectrum_binning(
             &filtered_experimental_spectrum.0,
             &filtered_experimental_spectrum.1,
             config.bin_size,
             config.bin_offset,
             charge,
-            shift,
             config.use_flanking_peaks,
         )?;
 
-        let y_prime = Self::calc_y_prime(&binned_experimental_spectrum, shift);
+        let y_prime = Self::calc_y_prime(&binned_experimental_spectrum);
 
         let mut fragment_charge = (charge - 1).max(1);
         if fragment_charge > config.max_fragment_charge {
@@ -87,7 +85,6 @@ impl FastXcorr<'_> {
             filtered_experimental_spectrum,
             max_experimental_mz,
             fragment_charge,
-            shift,
             y_prime,
         })
     }
@@ -96,29 +93,25 @@ impl FastXcorr<'_> {
     ///
     /// Arguments:
     /// * `binned_experimental_spectrum` - The binned experimental m/z values +/- m/z shift.
-    /// * `shift` - Number of shifted bins applied to the binned experimental spectrum.
     ///
-    pub fn calc_y_prime_shift(
-        binned_experimental_spectrum: &Array1<f64>,
-        shift: usize,
-    ) -> Array1<f64> {
+    pub fn calc_y_prime_shift(binned_experimental_spectrum: &Array1<f64>) -> Array1<f64> {
         // Extend by `shift` bins on both sides
         let mut y_prime_shift = Array1::zeros(binned_experimental_spectrum.len());
 
         // Binned spectrum wihtout the shifts
         let shiftless_binned_spectrum = binned_experimental_spectrum
-            .slice(s![shift..binned_experimental_spectrum.len() - shift]);
+            .slice(s![BIN_SHIFT..binned_experimental_spectrum.len() - BIN_SHIFT]);
 
         // Shift -75 to -1
-        for slice_start in 0..shift {
+        for slice_start in 0..BIN_SHIFT {
             let slice_end = slice_start + shiftless_binned_spectrum.len();
             let mut y_prime_shift_slice = y_prime_shift.slice_mut(s![slice_start..slice_end]);
             y_prime_shift_slice += &shiftless_binned_spectrum;
         }
 
         // Shift +1 to +75
-        let shift_start = shift + 1;
-        let shift_end = shift_start + shift;
+        let shift_start = BIN_SHIFT + 1;
+        let shift_end = shift_start + BIN_SHIFT;
         for slice_start in shift_start..shift_end {
             let slice_end = slice_start + shiftless_binned_spectrum.len();
             let mut y_prime_shift_slice = y_prime_shift.slice_mut(s![slice_start..slice_end]);
@@ -132,10 +125,9 @@ impl FastXcorr<'_> {
     ///
     /// Arguments:
     /// * `binned_experimental_spectrum` - The binned experimental m/z values +/- m/z shift.
-    /// * `shift` - Number of shifted bins applied to the binned experimental spectrum.
     ///
-    pub fn calc_y_prime(binned_experimental_spectrum: &Array1<f64>, shift: usize) -> Array1<f64> {
-        let mut y_prime_shift = Self::calc_y_prime_shift(binned_experimental_spectrum, shift);
+    pub fn calc_y_prime(binned_experimental_spectrum: &Array1<f64>) -> Array1<f64> {
+        let mut y_prime_shift = Self::calc_y_prime_shift(binned_experimental_spectrum);
         y_prime_shift /= 150.0;
         binned_experimental_spectrum - &y_prime_shift
     }
@@ -175,9 +167,9 @@ impl FastXcorr<'_> {
             self.config.bin_size,
             self.config.bin_offset,
             self.charge,
-            self.shift,
             Some(self.max_experimental_mz),
             false, // In the fast xcorr implementation the flanking peaks where "moved" to the experimental spectrum
+            true,
         )
     }
 
@@ -281,7 +273,7 @@ mod tests {
             .collect::<Array1<f64>>();
 
         // Remove the front shift
-        rouneded_xcorr_sped.slice_axis_inplace(Axis(0), Slice::new(xcorr.shift as isize, None, 1));
+        rouneded_xcorr_sped.slice_axis_inplace(Axis(0), Slice::new(BIN_SHIFT as isize, None, 1));
 
         // Just select the values that are in the expected spectrum from Eng
         rouneded_xcorr_sped =

@@ -9,3 +9,6 @@ pub mod scoring_result;
 pub mod xcorr;
 // Various utilities
 pub mod utils;
+
+/// +/- m/z shift for the xcorr calculation.
+pub const BIN_SHIFT: usize = 75;

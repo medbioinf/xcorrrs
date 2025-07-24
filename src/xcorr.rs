@@ -7,7 +7,8 @@ use crate::{
     configuration::Configuration,
     error::Error,
     scoring_result::ScoringResult,
-    utils::{calculate_number_of_bins_to_shift, create_threoretical_spectrum},
+    utils::create_threoretical_spectrum,
+    BIN_SHIFT,
 };
 
 // pub trait IsXcorr {
@@ -87,7 +88,6 @@ pub struct Xcorr<'a> {
     charge: usize,
     max_experimental_mz: f64,
     fragment_charge: usize,
-    shift: usize,
     binned_experimental_spectrum: Array1<f64>,
 }
 
@@ -136,14 +136,12 @@ impl Xcorr<'_> {
             .iter()
             .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
 
-        let shift = calculate_number_of_bins_to_shift(config.bin_size);
         let binned_experimental_spectrum = experimental_spectrum_binning(
             &filtered_experimental_spectrum.0,
             &filtered_experimental_spectrum.1,
             config.bin_size,
             config.bin_offset,
             charge,
-            shift,
             false, // The original xcorr applied the flanking peaks to the theoretical spectrum,
         )?;
 
@@ -157,7 +155,6 @@ impl Xcorr<'_> {
             charge,
             max_experimental_mz,
             fragment_charge,
-            shift,
             binned_experimental_spectrum,
         })
     }
@@ -232,9 +229,9 @@ impl Xcorr<'_> {
             self.config.bin_size,
             self.config.bin_offset,
             self.charge,
-            0, // Theoretical spectra are not shifted
             Some(self.max_experimental_mz),
             self.config.use_flanking_peaks,
+            false, // Theoretical spectra are not shifted
         )
     }
 
@@ -305,7 +302,7 @@ impl Xcorr<'_> {
         let ions_matched = self
             .binned_experimental_spectrum
             .slice(s![
-                self.shift..self.binned_experimental_spectrum.len() - self.shift
+                BIN_SHIFT..self.binned_experimental_spectrum.len() - BIN_SHIFT
             ])
             .iter()
             .zip(binned_thereoretical_spectrum.iter())
@@ -405,9 +402,9 @@ mod tests {
             let binned_theoretical_spectrum = ndarray::concatenate(
                 Axis(0),
                 &[
-                    Array::zeros(xcorr.shift).view(),
+                    Array::zeros(BIN_SHIFT).view(),
                     binned_theoretical_spectrum.view(),
-                    Array::zeros(xcorr.shift).view(),
+                    Array::zeros(BIN_SHIFT).view(),
                 ],
             )
             .unwrap();

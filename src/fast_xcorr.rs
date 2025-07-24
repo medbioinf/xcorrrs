@@ -158,6 +158,12 @@ impl FastXcorr<'_> {
         )
     }
 
+    /// Returns binned theoretical spectrum including shifts,
+    /// Ready to be used in the xcorr calculation.
+    ///
+    /// Arguments:
+    /// * `theoretical_spectrum` - The theoretical spectrum to bin.
+    ///
     pub fn theoretical_spectrum_binning(
         &self,
         theoretical_spectrum: &Array1<f64>,

@@ -2,10 +2,10 @@ pub mod binning;
 pub mod configuration;
 pub mod error;
 #[cfg(feature = "do-not-use-fast-xcorr")]
-/// Fast xcorr implementation
+/// Fast xcorr implementation. Less accurate than the reported xcorr in the test data (RSME 0.00018), but faster.
 pub mod fast_xcorr;
 pub mod scoring_result;
-/// Correlation based xcorr
+/// Correlation based xcorr. This is closer to the xcorr reported to in the test data (RSME 0.00003).
 pub mod xcorr;
 // Various utilities
 pub mod utils;

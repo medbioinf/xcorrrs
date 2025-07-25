@@ -85,7 +85,6 @@ use crate::{
 
 pub struct Xcorr<'a> {
     config: &'a Configuration,
-    charge: usize,
     max_experimental_mz: f64,
     fragment_charge: usize,
     binned_experimental_spectrum: Array1<f64>,
@@ -151,7 +150,6 @@ impl Xcorr<'_> {
 
         Ok(Xcorr {
             config,
-            charge,
             max_experimental_mz,
             fragment_charge,
             binned_experimental_spectrum,

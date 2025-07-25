@@ -12,8 +12,6 @@ use crate::{
 
 pub struct FastXcorr<'a> {
     config: &'a Configuration,
-    charge: usize,
-    filtered_experimental_spectrum: (Array1<f64>, Array1<f64>),
     max_experimental_mz: f64,
     fragment_charge: usize,
     y_prime: Array1<f64>,
@@ -80,8 +78,6 @@ impl FastXcorr<'_> {
 
         Ok(FastXcorr {
             config,
-            charge,
-            filtered_experimental_spectrum,
             max_experimental_mz,
             fragment_charge,
             y_prime,

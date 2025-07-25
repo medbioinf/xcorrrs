@@ -136,11 +136,15 @@ pub fn experimental_spectrum_binning(
         let window_end = (window_start + windows_size).min(binned_spec_end);
         let mut window = binned_spectrum.slice_mut(s![window_start..window_end]);
         let window_max: f64 = window.iter().fold(f64::NEG_INFINITY, |acc, &x| acc.max(x));
-
-        if window_max > 0.0 {
-            window /= window_max;
-            window *= 50.0;
-        }
+        // Comet is only normalizing if the value is greater than 0.05 of the wiundows maximum intensity
+        let window_intensity_cutoff = 0.05 * window_max;
+        window.mapv_inplace(|value| {
+            if value <= window_intensity_cutoff {
+                value
+            } else {
+                value / window_max * 50.0
+            }
+        });
     }
 
     if use_flanking_peaks {

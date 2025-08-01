@@ -8,6 +8,13 @@ pub struct ScoringResult {
     pub max_theoretical_mass: f64,
 }
 
+impl ScoringResult {
+    pub fn round_score(&self, decimals: u16) -> f64 {
+        let factor = 10f64.powi(decimals as i32);
+        (self.score * factor).round() / factor
+    }
+}
+
 impl Display for ScoringResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(

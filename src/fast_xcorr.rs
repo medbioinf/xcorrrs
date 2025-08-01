@@ -2,19 +2,23 @@ use ndarray::{s, Array1, Axis};
 use rustyms::CompoundPeptidoformIon;
 
 use crate::{
-    binning::{experimental_spectrum_binning, theoretical_spectrum_binning},
-    configuration::Configuration,
-    error::Error,
-    scoring_result::ScoringResult,
+    configuration::Configuration, error::Error, scoring_result::ScoringResult,
     utils::create_threoretical_spectrum,
-    BIN_SHIFT,
 };
+
+/// +/- m/z shift for the xcorr calculation.
+pub const BIN_SHIFT: usize = 75;
+
+/// According to the original authors, after binning the experimental spectrum, the maximum intensity is normalized
+/// over a number of fixed windows.
+pub const NUM_WINDOWS_FOR_NORMALIZATION: u8 = 10;
 
 pub struct FastXcorr<'a> {
     config: &'a Configuration,
     max_experimental_mz: f64,
     fragment_charge: usize,
-    y_prime: Array1<f64>,
+    /// y' prime from equation 6 in https://pubs.acs.org/doi/10.1021/pr800420s
+    preprocessed_experimental_spectrum: Array1<f64>,
 }
 
 impl FastXcorr<'_> {
@@ -61,7 +65,7 @@ impl FastXcorr<'_> {
 
         let max_experimental_mz = *filtered_experimental_spectrum.0.last().unwrap();
 
-        let binned_experimental_spectrum = experimental_spectrum_binning(
+        let binned_experimental_spectrum = Self::experimental_spectrum_binning(
             &filtered_experimental_spectrum.0,
             &filtered_experimental_spectrum.1,
             config.bin_size,
@@ -69,7 +73,8 @@ impl FastXcorr<'_> {
             config.use_flanking_peaks,
         )?;
 
-        let y_prime = Self::calc_y_prime(&binned_experimental_spectrum);
+        let preprocessed_experimental_spectrum =
+            Self::xcorr_prerprocessing(&binned_experimental_spectrum);
 
         let mut fragment_charge = (charge - 1).max(1);
         if fragment_charge > config.max_fragment_charge {
@@ -80,65 +85,204 @@ impl FastXcorr<'_> {
             config,
             max_experimental_mz,
             fragment_charge,
-            y_prime,
+            preprocessed_experimental_spectrum,
         })
     }
 
-    /// Calculates the specturm +/- 75 m/z shift from equation 6 in https://pubs.acs.org/doi/10.1021/pr800420s
+    /// Calculates the number of bins based on the maximum m/z value, bin size, and bin offset.
+    ///
+    /// # Arguments:
+    /// * `mz_max` - The maximum m/z value.
+    /// * `bin_size` - The size of each bin.
+    /// * `bin_offset` - The offset in monoisotopic mass.
+    ///
+    pub fn calc_number_of_bins(mz_max: f64, bin_size: f64, bin_offset: f64) -> usize {
+        (mz_max / bin_size + 1.0 - bin_offset) as usize + 2 + BIN_SHIFT
+    }
+
+    /// Calculates the binned position for a given m/z value.
+    /// This is used to determine which bin a given m/z value falls into.
     ///
     /// Arguments:
-    /// * `binned_experimental_spectrum` - The binned experimental m/z values +/- m/z shift.
+    /// * `mz` - The m/z value to be binned.
+    /// * `bin_size` - The size of the bins to be used for binning the spectrum.
+    /// * `bin_offset` - The offset in m/z to be applied before bin
     ///
-    pub fn calc_y_prime_shift(binned_experimental_spectrum: &Array1<f64>) -> Array1<f64> {
-        // Extend by `shift` bins on both sides
-        let mut y_prime_shift = Array1::zeros(binned_experimental_spectrum.len());
+    pub fn calc_binned_position(mz: f64, bin_size: f64, bin_offset: f64) -> usize {
+        (mz / bin_size + 1.0 - bin_offset) as usize
+    }
 
-        // Binned spectrum wihtout the shifts
-        let shiftless_binned_spectrum = binned_experimental_spectrum
-            .slice(s![BIN_SHIFT..binned_experimental_spectrum.len() - BIN_SHIFT]);
+    pub fn experimental_spectrum_binning(
+        mz: &Array1<f64>,
+        intensities: &Array1<f64>,
+        bin_size: f64,
+        bin_offset: f64,
+        use_flanking_peaks: bool,
+    ) -> Result<Array1<f64>, Error> {
+        let mz_max = mz.iter().fold(f64::NEG_INFINITY, |acc, &x| acc.max(x));
+        let number_of_bins = Self::calc_number_of_bins(mz_max, bin_size, bin_offset);
+        let mut binned_spectrum: Array1<f64> = Array1::zeros(number_of_bins);
 
-        // Shift -75 to -1
-        for slice_start in 0..BIN_SHIFT {
-            let slice_end = slice_start + shiftless_binned_spectrum.len();
-            let mut y_prime_shift_slice = y_prime_shift.slice_mut(s![slice_start..slice_end]);
-            y_prime_shift_slice += &shiftless_binned_spectrum;
+        for (mz, intensity) in mz.iter().zip(intensities.iter()) {
+            let index = Self::calc_binned_position(*mz, bin_size, bin_offset);
+            binned_spectrum[index] = binned_spectrum[index].max(intensity.sqrt());
         }
 
-        // Shift +1 to +75
-        let shift_start = BIN_SHIFT + 1;
-        let shift_end = shift_start + BIN_SHIFT;
-        for slice_start in shift_start..shift_end {
-            let slice_end = slice_start + shiftless_binned_spectrum.len();
-            let mut y_prime_shift_slice = y_prime_shift.slice_mut(s![slice_start..slice_end]);
-            y_prime_shift_slice += &shiftless_binned_spectrum;
+        let highest_ion = Self::calc_binned_position(mz_max, bin_size, bin_offset);
+        let windows_size = (highest_ion as f64 / NUM_WINDOWS_FOR_NORMALIZATION as f64) as usize + 1;
+
+        for window_start in (0..binned_spectrum.len()).step_by(windows_size) {
+            let window_end = (window_start + windows_size).min(binned_spectrum.len());
+            let mut window = binned_spectrum.slice_mut(s![window_start..window_end]);
+
+            let window_max = window.iter().fold(f64::NEG_INFINITY, |acc, &x| acc.max(x));
+            // Comet is only normalizing if the value is greater than 0.05 of the window's maximum intensity
+            let window_intensity_cutoff = 0.05 * window_max;
+            window.mapv_inplace(|value| {
+                if value <= window_intensity_cutoff {
+                    value
+                } else {
+                    value / window_max * 50.0
+                }
+            });
         }
 
-        y_prime_shift
+        if !use_flanking_peaks {
+            Ok(binned_spectrum)
+        } else {
+            let mut flanked_binned_spectrum = Array1::zeros(binned_spectrum.len());
+            binned_spectrum
+                .into_iter()
+                .enumerate()
+                .for_each(|(i, value)| {
+                    flanked_binned_spectrum[i] += value;
+                    let half_peak = value * 0.5;
+
+                    if i > 0 {
+                        flanked_binned_spectrum[i - 1] += half_peak;
+                    }
+                    if i < flanked_binned_spectrum.len() - 1 {
+                        flanked_binned_spectrum[i + 1] += half_peak;
+                    }
+                });
+            Ok(flanked_binned_spectrum)
+        }
     }
 
     /// Calculates y' from equation 6 in https://pubs.acs.org/doi/10.1021/pr800420s
     ///
     /// Arguments:
-    /// * `binned_experimental_spectrum` - The binned experimental m/z values +/- m/z shift.
+    /// * `binned_experimental_spectrum` - The binned experimental m/z values + m/z shift.
     ///
-    pub fn calc_y_prime(binned_experimental_spectrum: &Array1<f64>) -> Array1<f64> {
-        let mut y_prime_shift = Self::calc_y_prime_shift(binned_experimental_spectrum);
-        y_prime_shift /= 150.0;
-        binned_experimental_spectrum - &y_prime_shift
+    pub fn xcorr_prerprocessing(binned_experimental_spectrum: &Array1<f64>) -> Array1<f64> {
+        // Extend by `shift` bins on both sides
+        let mut corrected_experimental_spectrum_shift =
+            Array1::zeros(binned_experimental_spectrum.len());
+
+        // Shift -75 to -1  would be just a sum of the first 75 bins at position 0
+        let mut sum_offsets = binned_experimental_spectrum.slice(s![1..=BIN_SHIFT]).sum();
+        let mean_offset = sum_offsets / 150.0;
+        corrected_experimental_spectrum_shift[0] = binned_experimental_spectrum[0] - mean_offset;
+
+        // Calculate this once to use it in the loop and make it depending on the BIN_SHIFT
+        let bin_shift_plus = BIN_SHIFT + 1;
+
+        // For each subsequent i, update the sliding window
+        for i in 1..binned_experimental_spectrum.len() {
+            //     # When moving from i-1 to i, the window shifts:
+            //     # Old window: [(i-1)-75, (i-1)+75] excluding (i-1)
+            //     # New window: [i-75, i+75] excluding i
+
+            //     # Remove the leftmost element of the old window: (i-1)-75 = i-76
+            //     remove_idx = i - 76
+            //     if 0 <= remove_idx < spectrum_length:
+            //         sum_offsets -= spectrum[remove_idx]
+            if i >= bin_shift_plus {
+                sum_offsets -= binned_experimental_spectrum[i - bin_shift_plus];
+            }
+
+            //     # Add the rightmost element of the new window: i+75
+            //     add_idx = i + 75
+            //     if 0 <= add_idx < spectrum_length:
+            //         sum_offsets += spectrum[add_idx]
+            let add_idx = i + BIN_SHIFT;
+            if add_idx < binned_experimental_spectrum.len() {
+                sum_offsets += binned_experimental_spectrum[add_idx];
+            }
+
+            //     # Remove the old center (i-1) and add it back since we excluded it
+            //     if 0 <= i - 1 < spectrum_length:
+            //         sum_offsets += spectrum[i - 1]
+            let old_center = i - 1;
+            if old_center < binned_experimental_spectrum.len() {
+                sum_offsets += binned_experimental_spectrum[old_center];
+            }
+
+            //     # Remove the new center (i) since we exclude tau=0
+            //     if 0 <= i < spectrum_length:
+            //         sum_offsets -= spectrum[i]
+            if i < binned_experimental_spectrum.len() {
+                sum_offsets -= binned_experimental_spectrum[i];
+            }
+
+            //     mean_offset = sum_offsets / 150
+            //     corrected_spectrum[i] = spectrum[i] - mean_offset
+            let mean_offset = sum_offsets / 150.0;
+            corrected_experimental_spectrum_shift[i] =
+                binned_experimental_spectrum[i] - mean_offset;
+        }
+
+        corrected_experimental_spectrum_shift
     }
 
     /// Calculates the xcorr between an already binned theoretical and binned experimental spectra according to
     /// equation 6 in https://pubs.acs.org/doi/10.1021/pr800420s
     ///
     /// # Arguments
-    /// * `binned_theoretical_spectrum` - The binned theoretical m/z values + 75 m/z shift.
-    /// * `y_prime` - The y' values calculated from the experimental spectrum.
+    /// * `theoretical_spectrum` - Theoretical fragments.
+    /// * `preprocessed_experimental_spectrum` - The y' values calculated from the experimental spectrum.
     ///
-    pub fn xcorr_binned_spectrum(
-        binned_theoretical_spectrum: &Array1<f64>,
-        y_prime: &Array1<f64>,
+    pub fn xcorr_spectra(
+        theoretical_spectrum: &Array1<f64>,
+        preprocessed_experimental_spectrum: &Array1<f64>,
+        bin_size: f64,
+        bin_offset: f64,
     ) -> f64 {
-        binned_theoretical_spectrum.dot(y_prime) / 10000.0
+        let xcorr: f64 = theoretical_spectrum
+            .iter()
+            .map(|mz| {
+                let index = Self::calc_binned_position(*mz, bin_size, bin_offset);
+                preprocessed_experimental_spectrum[index]
+            })
+            .sum();
+
+        xcorr * 0.005
+    }
+
+    /// Calculates the xcorr between an already binned theoretical and binned experimental spectra according to
+    /// equation 6 in https://pubs.acs.org/doi/10.1021/pr800420s
+    ///
+    /// # Arguments
+    /// * `theoretical_spectrum` - Theoretical fragments.
+    /// * `preprocessed_experimental_spectrum` - The y' values calculated from the experimental spectrum.
+    ///
+    pub fn matched_ions(
+        theoretical_spectrum: &Array1<f64>,
+        preprocessed_experimental_spectrum: &Array1<f64>,
+        bin_size: f64,
+        bin_offset: f64,
+    ) -> usize {
+        theoretical_spectrum
+            .iter()
+            .map(|mz| {
+                let index = Self::calc_binned_position(*mz, bin_size, bin_offset);
+                if preprocessed_experimental_spectrum[index] > 0.0 {
+                    1
+                } else {
+                    0
+                }
+            })
+            .sum()
     }
 
     pub fn create_threoretical_spectrum(
@@ -150,26 +294,6 @@ impl FastXcorr<'_> {
             &self.config.fragmentation_model,
             self.fragment_charge,
             self.max_experimental_mz,
-        )
-    }
-
-    /// Returns binned theoretical spectrum including shifts,
-    /// Ready to be used in the xcorr calculation.
-    ///
-    /// Arguments:
-    /// * `theoretical_spectrum` - The theoretical spectrum to bin.
-    ///
-    pub fn theoretical_spectrum_binning(
-        &self,
-        theoretical_spectrum: &Array1<f64>,
-    ) -> Result<Array1<f64>, Error> {
-        theoretical_spectrum_binning(
-            theoretical_spectrum,
-            self.config.bin_size,
-            self.config.bin_offset,
-            Some(self.max_experimental_mz),
-            false, // In the fast xcorr implementation the flanking peaks where "moved" to the experimental spectrum
-            true,
         )
     }
 
@@ -191,27 +315,20 @@ impl FastXcorr<'_> {
         let theoretical_spectrum = self.create_threoretical_spectrum(&peptide)?;
         let ions_total = theoretical_spectrum.len();
 
-        let binned_thereoretical_spectrum =
-            self.theoretical_spectrum_binning(&theoretical_spectrum)?;
-
-        drop(theoretical_spectrum);
-
-        let ions_matched = binned_thereoretical_spectrum
-            .iter()
-            .zip(self.y_prime.iter())
-            .fold(0, |acc, (&theoretical_bin, &y_prime_bin)| {
-                if theoretical_bin > 0.0 && y_prime_bin > 0.0 {
-                    acc + 1
-                } else {
-                    acc
-                }
-            });
+        let ions_matched = Self::matched_ions(
+            &theoretical_spectrum,
+            &self.preprocessed_experimental_spectrum,
+            self.config.bin_size,
+            self.config.bin_offset,
+        );
 
         // Score
-        let score = Self::xcorr_binned_spectrum(&binned_thereoretical_spectrum, &self.y_prime);
-
-        // binned_thereoretical_spectrum
-        //     .slice_axis_inplace(Axis(0), Slice::new((self.shift + 40) as isize, None, 1));
+        let score = Self::xcorr_spectra(
+            &theoretical_spectrum,
+            &self.preprocessed_experimental_spectrum,
+            self.config.bin_size,
+            self.config.bin_offset,
+        );
 
         Ok(ScoringResult {
             score,
@@ -229,7 +346,6 @@ mod tests {
 
     use crate::utils::tests::{get_eng_experimental_spectrum, get_eng_fast_xcorr_spectrum};
 
-    use ndarray::Slice;
     use polars::prelude::*;
 
     use super::*;
@@ -237,7 +353,7 @@ mod tests {
     /// Checks the Xcorr spectrum (y-prime) against the data provided by Eng
     ///
     #[test]
-    fn test_y_prime() {
+    fn test_preprocessed_experimental_spectrum() {
         let expected_xcorr_spec = get_eng_fast_xcorr_spectrum();
 
         // Create config  for low resolution data
@@ -257,25 +373,56 @@ mod tests {
         .unwrap();
 
         let mut rouneded_xcorr_sped = xcorr
-            .y_prime
+            .preprocessed_experimental_spectrum
             .iter()
             .map(|x| (x * 100.0).round() / 100.0)
             .collect::<Array1<f64>>();
-
-        // Remove the front shift
-        rouneded_xcorr_sped.slice_axis_inplace(Axis(0), Slice::new(BIN_SHIFT as isize, None, 1));
 
         // Just select the values that are in the expected spectrum from Eng
         rouneded_xcorr_sped =
             rouneded_xcorr_sped.select(Axis(0), expected_xcorr_spec.0.as_slice().unwrap());
 
-        let rounded_expeced_xcorr_spec = expected_xcorr_spec
+        let rounded_expected_xcorr_spec = expected_xcorr_spec
             .1
             .iter()
             .map(|x| (x * 100.0).round() / 100.0)
             .collect::<Array1<f64>>();
 
-        assert_eq!(rouneded_xcorr_sped, rounded_expeced_xcorr_spec)
+        if env::var("VERBOSE").is_ok() {
+            let mut binned_experimental_spectrum = FastXcorr::experimental_spectrum_binning(
+                &experimental_spectrum.0,
+                &experimental_spectrum.1,
+                config.bin_size,
+                config.bin_offset,
+                config.use_flanking_peaks,
+            )
+            .unwrap();
+            binned_experimental_spectrum = binned_experimental_spectrum
+                .select(Axis(0), expected_xcorr_spec.0.as_slice().unwrap());
+
+            let output_file =
+                std::fs::File::create("DIGSETK_fast_xcorr_preprocessing.tsv").unwrap();
+            let mut output_writer = std::io::BufWriter::new(output_file);
+
+            let _ = output_writer
+                .write("bin\texpected\tcalc_binned\tcalc_prep\n".as_bytes())
+                .unwrap();
+            for (idx, (expected, (calc_binned, calc_prep))) in rounded_expected_xcorr_spec
+                .iter()
+                .zip(
+                    binned_experimental_spectrum
+                        .iter()
+                        .zip(rouneded_xcorr_sped.iter()),
+                )
+                .enumerate()
+            {
+                let _ = output_writer
+                    .write(format!("{idx}\t{expected}\t{calc_binned}\t{calc_prep}\n").as_bytes())
+                    .unwrap();
+            }
+        }
+
+        assert_eq!(rouneded_xcorr_sped, rounded_expected_xcorr_spec)
     }
 
     /// Tests the xcorr calculation against data provided by the J. Eng
@@ -320,11 +467,14 @@ mod tests {
 
         if env::var("VERBOSE").is_ok() {
             let peptide = CompoundPeptidoformIon::pro_forma("DIGSETK", None).unwrap();
-            let binned_theoretical_spectrum = xcorr
-                .theoretical_spectrum_binning(
-                    &xcorr.create_threoretical_spectrum(&peptide).unwrap(),
-                )
-                .unwrap();
+
+            let mut binned_theoretical_spectrum =
+                Array1::zeros(xcorr.preprocessed_experimental_spectrum.len());
+            for mz in &xcorr.create_threoretical_spectrum(&peptide).unwrap() {
+                let index =
+                    FastXcorr::calc_binned_position(*mz, config.bin_size, config.bin_offset);
+                binned_theoretical_spectrum[index] = 50.0;
+            }
 
             let output_file =
                 std::fs::File::create("DIGSETK__fast_xcorr_bin___theoretical_bin.tsv").unwrap();
@@ -334,7 +484,7 @@ mod tests {
                 .write("bin\texperimental_bin\ttheoretical_bin\n".as_bytes())
                 .unwrap();
             for (idx, (fast_xcorr_bin, theoretical_bin)) in xcorr
-                .y_prime
+                .preprocessed_experimental_spectrum
                 .iter()
                 .zip(binned_theoretical_spectrum.iter())
                 .enumerate()

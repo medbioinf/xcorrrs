@@ -17,7 +17,6 @@ exclude = [
 
 [dependencies]
 ndarray = "0.16.1"
-ndrustfft = "0.5.0"
 rustyms = "0.10.0"
 thiserror = "2.0.12"
 

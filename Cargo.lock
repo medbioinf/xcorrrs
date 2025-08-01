@@ -4749,6 +4749,7 @@ name = "xcorrrs"
 version = "0.0.1"
 dependencies = [
  "dihardts_omicstools",
+ "itertools 0.14.0",
  "ndarray",
  "ndarray-stats",
  "plotly",

@@ -208,44 +208,24 @@ impl FastXcorr<'_> {
 
         // For each subsequent i, update the sliding window
         for i in 1..binned_experimental_spectrum.len() {
-            //     # When moving from i-1 to i, the window shifts:
-            //     # Old window: [(i-1)-75, (i-1)+75] excluding (i-1)
-            //     # New window: [i-75, i+75] excluding i
-
-            //     # Remove the leftmost element of the old window: (i-1)-75 = i-76
-            //     remove_idx = i - 76
-            //     if 0 <= remove_idx < spectrum_length:
-            //         sum_offsets -= spectrum[remove_idx]
             if i >= bin_shift_plus {
                 sum_offsets -= binned_experimental_spectrum[i - bin_shift_plus];
             }
 
-            //     # Add the rightmost element of the new window: i+75
-            //     add_idx = i + 75
-            //     if 0 <= add_idx < spectrum_length:
-            //         sum_offsets += spectrum[add_idx]
             let add_idx = i + BIN_SHIFT;
             if add_idx < binned_experimental_spectrum.len() {
                 sum_offsets += binned_experimental_spectrum[add_idx];
             }
 
-            //     # Remove the old center (i-1) and add it back since we excluded it
-            //     if 0 <= i - 1 < spectrum_length:
-            //         sum_offsets += spectrum[i - 1]
             let old_center = i - 1;
             if old_center < binned_experimental_spectrum.len() {
                 sum_offsets += binned_experimental_spectrum[old_center];
             }
 
-            //     # Remove the new center (i) since we exclude tau=0
-            //     if 0 <= i < spectrum_length:
-            //         sum_offsets -= spectrum[i]
             if i < binned_experimental_spectrum.len() {
                 sum_offsets -= binned_experimental_spectrum[i];
             }
 
-            //     mean_offset = sum_offsets / 150
-            //     corrected_spectrum[i] = spectrum[i] - mean_offset
             let mean_offset = sum_offsets / 150.0;
             corrected_experimental_spectrum_shift[i] =
                 binned_experimental_spectrum[i] - mean_offset;

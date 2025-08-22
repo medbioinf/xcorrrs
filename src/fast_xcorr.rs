@@ -2,7 +2,7 @@ use ndarray::{s, Array1, Axis};
 use rustyms::CompoundPeptidoformIon;
 
 use crate::{
-    configuration::Configuration, error::Error, scoring_result::ScoringResult,
+    configuration::FinalizedConfiguration, error::Error, scoring_result::ScoringResult,
     utils::create_threoretical_spectrum,
 };
 
@@ -14,7 +14,7 @@ pub const BIN_SHIFT: usize = 75;
 pub const NUM_WINDOWS_FOR_NORMALIZATION: u8 = 10;
 
 pub struct FastXcorr<'a> {
-    config: &'a Configuration,
+    config: &'a FinalizedConfiguration,
     max_experimental_mz: f64,
     fragment_charge: usize,
     /// y' prime from equation 6 in https://pubs.acs.org/doi/10.1021/pr800420s
@@ -30,7 +30,7 @@ impl FastXcorr<'_> {
     /// * `charge` - Precursor charge
     ///
     pub fn new<'a>(
-        config: &'a Configuration,
+        config: &'a FinalizedConfiguration,
         experimental_spectrum: (&'a Array1<f64>, &'a Array1<f64>),
         charge: usize,
     ) -> Result<FastXcorr<'a>, Error> {
@@ -54,7 +54,7 @@ impl FastXcorr<'_> {
             .map(|(index, _)| index)
             .collect::<Vec<usize>>();
 
-        let filtered_experimental_spectrum = (
+        let mut filtered_experimental_spectrum = (
             experimental_spectrum
                 .0
                 .select(Axis(0), &considerable_peaks_indexes),
@@ -62,6 +62,25 @@ impl FastXcorr<'_> {
                 .1
                 .select(Axis(0), &considerable_peaks_indexes),
         );
+
+        if let Some((min_mz, max_mz)) = config.clear_mz_range {
+            let considerable_peaks_indexes = experimental_spectrum
+                .0
+                .iter()
+                .enumerate()
+                .filter(|(_, &mz)| mz <= min_mz && mz >= max_mz)
+                .map(|(index, _)| index)
+                .collect::<Vec<usize>>();
+
+            filtered_experimental_spectrum = (
+                experimental_spectrum
+                    .0
+                    .select(Axis(0), &considerable_peaks_indexes),
+                experimental_spectrum
+                    .1
+                    .select(Axis(0), &considerable_peaks_indexes),
+            );
+        }
 
         let max_experimental_mz = *filtered_experimental_spectrum.0.last().unwrap();
 
@@ -352,7 +371,7 @@ mod tests {
     use rayon::prelude::*;
 
     use crate::{
-        configuration::Configuration,
+        configuration::{Configuration, FinalizedConfiguration},
         fast_xcorr::FastXcorr,
         utils::tests::{get_spectrum, read_test_data},
     };
@@ -366,11 +385,13 @@ mod tests {
         let expected_xcorr_spec = get_eng_fast_xcorr_spectrum();
 
         // Create config  for low resolution data
-        let config = Configuration {
+        let config: FinalizedConfiguration = Configuration {
             bin_size: 1.0005,
             bin_offset: 0.4,
+            use_flanking_peaks: true,
             ..Configuration::default()
-        };
+        }
+        .into();
 
         let experimental_spectrum = get_eng_experimental_spectrum();
 
@@ -460,12 +481,12 @@ mod tests {
                 .to_owned(),
         );
 
-        let config = Configuration {
+        let config: FinalizedConfiguration = Configuration {
             bin_size: 1.0005,
             bin_offset: 0.4,
-            use_flanking_peaks: true,
             ..Configuration::default()
-        };
+        }
+        .into();
 
         let xcorr = FastXcorr::new(
             &config,
@@ -533,11 +554,12 @@ mod tests {
 
                 let (mz_array, intensity_array) = get_spectrum(scan.to_string().as_str());
 
-                let config = Configuration {
+                let config: FinalizedConfiguration = Configuration {
                     use_flanking_peaks: true,
                     max_fragment_charge: 5,
                     ..Configuration::default()
-                };
+                }
+                .into();
 
                 // fast xcorr implementation
                 let fast_xcorr =

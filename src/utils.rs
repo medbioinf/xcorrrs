@@ -1,6 +1,5 @@
 use ndarray::Array1;
 use rustyms::{
-    fragment::FragmentType,
     system::{e, usize::Charge},
     CompoundPeptidoformIon,
     Element::H as Hydrogen,
@@ -36,7 +35,6 @@ pub fn create_threoretical_spectrum(
     let mut mz: Vec<f64> = peptide
         .generate_theoretical_fragments(Charge::new::<e>(max_charge), fragmentation_model)
         .into_iter()
-        .filter(|f| f.ion != FragmentType::Precursor)
         .filter_map(|f| f.mz(MassMode::Monoisotopic).map(|mz| mz.value))
         .filter(|mz| *mz <= max_mz)
         .collect();
@@ -48,7 +46,7 @@ pub fn create_threoretical_spectrum(
 
 #[cfg(test)]
 pub mod tests {
-    use crate::configuration::Configuration;
+    use crate::configuration::{Configuration, FinalizedConfiguration};
 
     use super::*;
     use std::path::PathBuf;
@@ -59,7 +57,7 @@ pub mod tests {
     #[test]
     fn test_fragment_creation() {
         let max_charge = 6;
-        let config = Configuration::default();
+        let config: FinalizedConfiguration = Configuration::default().into();
         let peptide = CompoundPeptidoformIon::pro_forma("DIGSETK", None).unwrap();
 
         let mut charge_states = vec![false; max_charge + 1];

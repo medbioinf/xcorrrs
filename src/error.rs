@@ -24,4 +24,6 @@ pub enum Error {
     NoChargeProvided,
     #[error("Something went wrong: {0}")]
     Correleation(Box<dyn std::error::Error>),
+    #[error("Invalid configuration: {0}")]
+    InvalidConfiguration(String),
 }

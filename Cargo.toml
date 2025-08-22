@@ -1,6 +1,6 @@
 [package]
 name = "xcorrrs"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 description = "Reimplmenmentation of Comet's xcorr algorithm."
 repository = "https://github.com/medbioinf/xcorrrs"

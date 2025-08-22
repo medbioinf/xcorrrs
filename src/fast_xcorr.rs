@@ -240,6 +240,8 @@ impl FastXcorr<'_> {
     /// # Arguments
     /// * `theoretical_spectrum` - Theoretical fragments.
     /// * `preprocessed_experimental_spectrum` - The y' values calculated from the experimental spectrum.
+    /// * `bin_size` - The size of the bins used for binning the experimental spectrum.
+    /// * `bin_offset` - The offset in m/z to be applied before binning
     ///
     pub fn xcorr_spectra(
         theoretical_spectrum: &Array1<f64>,
@@ -258,12 +260,13 @@ impl FastXcorr<'_> {
         xcorr * 0.005
     }
 
-    /// Calculates the xcorr between an already binned theoretical and binned experimental spectra according to
-    /// equation 6 in https://pubs.acs.org/doi/10.1021/pr800420s
+    /// Calculates the number of matched ions between the theoretical spectrum and the preprocessed experimental spectrum.
     ///
     /// # Arguments
     /// * `theoretical_spectrum` - Theoretical fragments.
     /// * `preprocessed_experimental_spectrum` - The y' values calculated from the experimental spectrum.
+    /// * `bin_size` - The size of the bins used for binning the experimental spectrum.
+    /// * `bin_offset` - The offset in m/z to be applied before binning
     ///
     pub fn matched_ions(
         theoretical_spectrum: &Array1<f64>,
@@ -284,6 +287,11 @@ impl FastXcorr<'_> {
             .sum()
     }
 
+    /// Creates a theoretical spectrum for the given peptide.
+    ///
+    /// # Arguments
+    /// * `peptide` - The peptide sequence to create the theoretical spectrum for.
+    ///
     pub fn create_threoretical_spectrum(
         &self,
         peptide: &CompoundPeptidoformIon,

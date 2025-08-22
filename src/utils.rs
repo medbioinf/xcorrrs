@@ -22,21 +22,19 @@ pub fn dalton_to_mass_to_charge(mass: f64, charge: usize) -> f64 {
 /// Creates a theoretical spectrum from a list of fragments.
 ///
 /// # Arguments
-/// * `fragments` - A slice of `Fragment` objects representing the theoretical fragments.
+/// * `peptide` - The peptide for which to generate the theoretical spectrum.
+/// * `fragmentation_model` - The fragmentation model to use for generating fragments.
 /// * `max_charge` - The maximum charge state to consider for the fragments.
-/// * `max_mz` - The maximum m/z value to consider for the fragments.
 ///
 pub fn create_threoretical_spectrum(
     peptide: &CompoundPeptidoformIon,
     fragmentation_model: &FragmentationModel,
     max_charge: usize,
-    max_mz: f64,
 ) -> Result<Array1<f64>, Error> {
     let mut mz: Vec<f64> = peptide
         .generate_theoretical_fragments(Charge::new::<e>(max_charge), fragmentation_model)
         .into_iter()
         .filter_map(|f| f.mz(MassMode::Monoisotopic).map(|mz| mz.value))
-        .filter(|mz| *mz <= max_mz)
         .collect();
 
     mz.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));

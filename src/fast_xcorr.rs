@@ -15,7 +15,6 @@ pub const NUM_WINDOWS_FOR_NORMALIZATION: u8 = 10;
 
 pub struct FastXcorr<'a> {
     config: &'a FinalizedConfiguration,
-    max_experimental_mz: f64,
     fragment_charge: usize,
     /// y' prime from equation 6 in https://pubs.acs.org/doi/10.1021/pr800420s
     preprocessed_experimental_spectrum: Array1<f64>,
@@ -82,8 +81,6 @@ impl FastXcorr<'_> {
             );
         }
 
-        let max_experimental_mz = *filtered_experimental_spectrum.0.last().unwrap();
-
         let binned_experimental_spectrum = Self::experimental_spectrum_binning(
             &filtered_experimental_spectrum.0,
             &filtered_experimental_spectrum.1,
@@ -102,7 +99,6 @@ impl FastXcorr<'_> {
 
         Ok(FastXcorr {
             config,
-            max_experimental_mz,
             fragment_charge,
             preprocessed_experimental_spectrum,
         })
@@ -253,7 +249,11 @@ impl FastXcorr<'_> {
             .iter()
             .map(|mz| {
                 let index = Self::calc_binned_position(*mz, bin_size, bin_offset);
-                preprocessed_experimental_spectrum[index]
+                if index < preprocessed_experimental_spectrum.len() {
+                    preprocessed_experimental_spectrum[index]
+                } else {
+                    0.0
+                }
             })
             .sum();
 
@@ -278,7 +278,9 @@ impl FastXcorr<'_> {
             .iter()
             .map(|mz| {
                 let index = Self::calc_binned_position(*mz, bin_size, bin_offset);
-                if preprocessed_experimental_spectrum[index] > 0.0 {
+                if index < preprocessed_experimental_spectrum.len()
+                    && preprocessed_experimental_spectrum[index] > 0.0
+                {
                     1
                 } else {
                     0
@@ -300,7 +302,6 @@ impl FastXcorr<'_> {
             peptide,
             &self.config.fragmentation_model,
             self.fragment_charge,
-            self.max_experimental_mz,
         )
     }
 
@@ -491,7 +492,9 @@ mod tests {
             for mz in &xcorr.create_threoretical_spectrum(&peptide).unwrap() {
                 let index =
                     FastXcorr::calc_binned_position(*mz, config.bin_size, config.bin_offset);
-                binned_theoretical_spectrum[index] = 50.0;
+                if index < binned_theoretical_spectrum.len() {
+                    binned_theoretical_spectrum[index] = 50.0;
+                }
             }
 
             let output_file =

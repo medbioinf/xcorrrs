@@ -1,3 +1,5 @@
+![crates.io](https://img.shields.io/crates/v/xcorrrs.svg)
+
 # xcorrrs
 
 Standalone Rust implementation of [Comet's](https://uwpr.github.io/Comet/) XCorr based on 

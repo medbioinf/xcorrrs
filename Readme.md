@@ -1,4 +1,4 @@
-![crates.io](https://img.shields.io/crates/v/xcorrrs.svg)
+[![Crates.io](https://img.shields.io/crates/v/xcorrrs.svg)](https://crates.io/crates/xcorrrs)
 
 # xcorrrs
 

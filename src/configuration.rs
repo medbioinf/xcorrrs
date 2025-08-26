@@ -11,7 +11,7 @@ use crate::error::Error;
 /// Ion types used in configuration to select which ion series to use
 /// for the fragmentation model.
 ///
-#[derive(PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub enum Ion {
     A,
     B,
@@ -57,7 +57,7 @@ impl TryFrom<String> for Ion {
 /// Although it is much simpler as it only contains parameters related to the
 /// fragmentation model and the experimental spectrum processing.
 ///
-#[derive(PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Configuration {
     /// Same as: https://uwpr.github.io/Comet/parameters/parameters_202501/fragment_bin_tol.html
     pub bin_size: f64,
@@ -97,6 +97,7 @@ impl Default for Configuration {
 /// This configuration is created from the `Configuration` struct and contains
 /// a `FragmentationModel` that is built based on the selected ions.
 ///
+#[derive(Clone, PartialEq)]
 pub struct FinalizedConfiguration {
     /// Fragmentation model that is built based on the selected ions.
     pub fragmentation_model: FragmentationModel,

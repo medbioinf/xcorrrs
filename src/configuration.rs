@@ -97,7 +97,7 @@ impl Default for Configuration {
 /// This configuration is created from the `Configuration` struct and contains
 /// a `FragmentationModel` that is built based on the selected ions.
 ///
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct FinalizedConfiguration {
     /// Fragmentation model that is built based on the selected ions.
     pub fragmentation_model: FragmentationModel,

@@ -7,7 +7,7 @@ repository = "https://github.com/medbioinf/xcorrrs"
 homepage = "https://github.com/medbioinf/xcorrrs"
 documentation = "https://docs.rs/xcorrrs"
 license-file = "LICENSE"
-readme = "Readme.md"
+readme = "README.md"
 
 exclude = [
     "/.github",

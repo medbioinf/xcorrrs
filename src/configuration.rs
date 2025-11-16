@@ -75,6 +75,10 @@ pub struct Configuration {
     pub use_neutral_loss_ions: bool,
     /// Same as: https://uwpr.github.io/Comet/parameters/parameters_202502/clear_mz_range.html
     pub clear_mz_range: Option<(f64, f64)>,
+    /// Lower fragment mass tolerance in ppm
+    pub lower_fragment_tolerance: f64,
+    /// Upper fragment mass tolerance in ppm
+    pub upper_fragment_tolerance: f64,
 }
 
 impl Default for Configuration {
@@ -89,6 +93,8 @@ impl Default for Configuration {
             ions: vec![Ion::B, Ion::Y],
             use_neutral_loss_ions: false,
             clear_mz_range: None,
+            lower_fragment_tolerance: 10.0,
+            upper_fragment_tolerance: 10.0,
         }
     }
 }

@@ -13,9 +13,20 @@ pub const BIN_SHIFT: usize = 75;
 /// over a number of fixed windows.
 pub const NUM_WINDOWS_FOR_NORMALIZATION: u8 = 10;
 
+/// Size of each chunk in the sparse SP score matrix.
+const SP_MATRIX_SIZE: usize = 100;
+
+/// A small value to consider as zero in the SP score matrix.
+/// Called FLOAT_ZERO in the Comet source code.
+const NEARLY_ZERO: f64 = 1e-6;
+
 pub struct FastXcorr<'a> {
     config: &'a FinalizedConfiguration,
     fragment_charge: usize,
+    /// experimental spectrum
+    experimental_spectrum: (&'a Array1<f64>, &'a Array1<f64>),
+    /// Sparse SP score matrix
+    sp_matrix: Vec<Option<Vec<f64>>>,
     /// y' prime from equation 6 in https://pubs.acs.org/doi/10.1021/pr800420s
     preprocessed_experimental_spectrum: Array1<f64>,
 }
@@ -89,6 +100,8 @@ impl FastXcorr<'_> {
             config.use_flanking_peaks,
         )?;
 
+        let sp_matrix = Self::build_sparse_sp_score(&binned_experimental_spectrum);
+
         let preprocessed_experimental_spectrum =
             Self::xcorr_prerprocessing(&binned_experimental_spectrum);
 
@@ -100,6 +113,8 @@ impl FastXcorr<'_> {
         Ok(FastXcorr {
             config,
             fragment_charge,
+            experimental_spectrum,
+            sp_matrix,
             preprocessed_experimental_spectrum,
         })
     }
@@ -264,22 +279,31 @@ impl FastXcorr<'_> {
     ///
     /// # Arguments
     /// * `theoretical_spectrum` - Theoretical fragments.
-    /// * `preprocessed_experimental_spectrum` - The y' values calculated from the experimental spectrum.
-    /// * `bin_size` - The size of the bins used for binning the experimental spectrum.
-    /// * `bin_offset` - The offset in m/z to be applied before binning
+    /// * `experimental_spectrum` - The m/z values from the experimental spectrum.
+    /// * `upper_fragment_tolerance` - The upper tolerance for matching fragments (ppm)
+    /// * `lower_fragment_tolerance` - The lower tolerance for matching fragments (ppm)
     ///
-    pub fn matched_ions(
+    pub fn match_ions_tolerance_based(
         theoretical_spectrum: &Array1<f64>,
-        preprocessed_experimental_spectrum: &Array1<f64>,
-        bin_size: f64,
-        bin_offset: f64,
+        experimental_spectrum: &(&Array1<f64>, &Array1<f64>),
+        lower_fragment_tolerance: f64,
+        upper_fragment_tolerance: f64,
     ) -> usize {
         theoretical_spectrum
             .iter()
             .map(|mz| {
-                let index = Self::calc_binned_position(*mz, bin_size, bin_offset);
-                if index < preprocessed_experimental_spectrum.len()
-                    && preprocessed_experimental_spectrum[index] > 0.0
+                let lower_bound = mz - (mz / 1_000_000.0) * lower_fragment_tolerance;
+                let upper_bound = mz + (mz / 1_000_000.0) * upper_fragment_tolerance;
+
+                if experimental_spectrum
+                    .0
+                    .iter()
+                    .enumerate()
+                    .any(|(i, &exp_mz)| {
+                        exp_mz >= lower_bound
+                            && exp_mz <= upper_bound
+                            && experimental_spectrum.1[i] > 0.0
+                    })
                 {
                     1
                 } else {
@@ -287,6 +311,96 @@ impl FastXcorr<'_> {
                 }
             })
             .sum()
+    }
+
+    fn match_ions_sp_score_based(
+        theoretical_spectrum: &Array1<f64>,
+        sp_matrix: &[Option<Vec<f64>>],
+        bin_size: f64,
+        bin_offset: f64,
+    ) -> usize {
+        theoretical_spectrum
+            .iter()
+            .map(|mz| {
+                let index = Self::calc_binned_position(*mz, bin_size, bin_offset);
+                let sp_score = Self::find_sp_score(sp_matrix, index);
+                if sp_score > NEARLY_ZERO {
+                    1
+                } else {
+                    0
+                }
+            })
+            .sum()
+    }
+
+    /// Build a chunked sparse SP score matrix from a dense vector of intensities.
+    ///
+    /// Behavior mirrors the C implementation in `CometPreprocess::PreprocessSpectrum`:
+    /// - Normalize intensities to `100.0 * intensity / max_intensity`.
+    /// - SPARSE rows are `sparse_matrix_size` wide.
+    /// - Number of rows `i_sp_score_data = data.len() / sparse_matrix_size + 1`.
+    /// - Rows are allocated on-demand (only when at least one normalized value in the row > NEARLY_ZERO).
+    /// - Returns `(sparse_matrix, i_sp_score_data)`, where `sparse_matrix` is a Vec<Option<Vec<f32>>>.
+    ///
+    /// # Arguments
+    /// * `spectrum` - Binned normalized spectrum.
+    ///
+    pub fn build_sparse_sp_score(spectrum: &Array1<f64>) -> Vec<Option<Vec<f64>>> {
+        // Find max intensity (equivalent to pPre.dHighestIntensity in C)
+        let max_intensity = spectrum
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, |a, b| a.max(b));
+
+        // compute number of sparse rows (iSpScoreData)
+        let matrix_size = spectrum.len() / SP_MATRIX_SIZE + 1;
+
+        // top-level vector of optional rows, initially None (like new float*[iSpScoreData]())
+        let mut sparse: Vec<Option<Vec<f64>>> = vec![None; matrix_size];
+
+        // If max_intensity <= 0.0, treat as all zeros -> nothing to allocate
+        if max_intensity <= 0.0 {
+            return sparse;
+        }
+
+        for i in 0..spectrum.len() {
+            let normalized = 100.0 * spectrum[i] / max_intensity;
+            // treat small values as zero (C checks pfSpScoreData[i] > NEARLY_ZERO)
+            if normalized > NEARLY_ZERO {
+                let x = i / SP_MATRIX_SIZE; // row
+                let y = i - (x * SP_MATRIX_SIZE); // col in row
+
+                // allocate row if necessary, initialize to zeros
+                if sparse[x].is_none() {
+                    sparse[x] = Some(vec![0.0_f64; SP_MATRIX_SIZE]);
+                }
+
+                // safe to unwrap now
+                if let Some(ref mut row) = sparse[x] {
+                    row[y] = normalized;
+                }
+            }
+        }
+
+        sparse
+    }
+
+    /// Return the SP score for a given binned position from the sparse SP score matrix.
+    ///
+    /// # Arguments
+    /// * `sparse` - The sparse SP score matrix.
+    /// * `bin` - The binned position to retrieve the SP score for.
+    ///
+    pub fn find_sp_score(sparse: &[Option<Vec<f64>>], bin: usize) -> f64 {
+        let x = bin / SP_MATRIX_SIZE; // row
+
+        if x >= sparse.len() || bin == 0 || sparse[x].is_none() {
+            return 0.0_f64;
+        }
+
+        let y = bin - (x * SP_MATRIX_SIZE); // col in row
+        let row = sparse[x].as_ref().unwrap();
+        row[y]
     }
 
     /// Creates a theoretical spectrum for the given peptide.
@@ -323,9 +437,16 @@ impl FastXcorr<'_> {
         let theoretical_spectrum = self.create_threoretical_spectrum(&peptide)?;
         let ions_total = theoretical_spectrum.len();
 
-        let ions_matched = Self::matched_ions(
+        let ions_match_tolerance_based = Self::match_ions_tolerance_based(
             &theoretical_spectrum,
-            &self.preprocessed_experimental_spectrum,
+            &self.experimental_spectrum,
+            self.config.lower_fragment_tolerance,
+            self.config.upper_fragment_tolerance,
+        );
+
+        let ions_matched_sp_score_based = Self::match_ions_sp_score_based(
+            &theoretical_spectrum,
+            &self.sp_matrix,
             self.config.bin_size,
             self.config.bin_offset,
         );
@@ -343,7 +464,8 @@ impl FastXcorr<'_> {
             min_theoretical_mass,
             max_theoretical_mass,
             ions_total,
-            ions_matched,
+            ions_match_tolerance_based,
+            ions_matched_sp_score_based,
         })
     }
 }
@@ -378,6 +500,8 @@ mod tests {
             bin_size: 1.0005,
             bin_offset: 0.4,
             use_flanking_peaks: true,
+            lower_fragment_tolerance: 20.0,
+            upper_fragment_tolerance: 20.0,
             ..Configuration::default()
         }
         .into();
@@ -473,6 +597,8 @@ mod tests {
         let config: FinalizedConfiguration = Configuration {
             bin_size: 1.0005,
             bin_offset: 0.4,
+            lower_fragment_tolerance: 20.0,
+            upper_fragment_tolerance: 20.0,
             ..Configuration::default()
         }
         .into();
@@ -527,7 +653,7 @@ mod tests {
         let comet_df = read_test_data();
 
         #[allow(clippy::type_complexity)]
-        let results: Vec<(i64, String, f64, f64, u64, u64, u64, u64)> = (0..comet_df.height())
+        let results: Vec<(i64, String, f64, f64, u64, u64, u64, u64, u64)> = (0..comet_df.height())
             .into_par_iter()
             .map(|idx| {
                 let scan = comet_df["scan"].i64().unwrap().get(idx).unwrap();
@@ -548,6 +674,8 @@ mod tests {
                 let config: FinalizedConfiguration = Configuration {
                     use_flanking_peaks: true,
                     max_fragment_charge: 5,
+                    lower_fragment_tolerance: 10.0,
+                    upper_fragment_tolerance: 10.0,
                     ..Configuration::default()
                 }
                 .into();
@@ -564,7 +692,8 @@ mod tests {
                     comet_xcorr,
                     scoring.round_score(3),
                     comet_ions_matched,
-                    scoring.ions_matched as u64,
+                    scoring.ions_match_tolerance_based as u64,
+                    scoring.ions_matched_sp_score_based as u64,
                     comet_ions_total,
                     scoring.ions_total as u64,
                 )
@@ -577,10 +706,12 @@ mod tests {
             comet_xcorr_col,
             rs_xcorr_col,
             comet_ions_match_col,
-            rs_ions_matched_col,
+            rs_ions_matched_tolerance_based_col,
+            rs_ions_matched_sp_score_based_col,
             comet_ions_total_col,
             rs_ions_total_col,
         ): (
+            Vec<_>,
             Vec<_>,
             Vec<_>,
             Vec<_>,
@@ -597,7 +728,14 @@ mod tests {
             Column::new("comet_xcorr".into(), comet_xcorr_col),
             Column::new("rs_xcorr".into(), rs_xcorr_col),
             Column::new("comet_ions_match".into(), comet_ions_match_col),
-            Column::new("rs_ions_matched".into(), rs_ions_matched_col),
+            Column::new(
+                "rs_ions_matched_tolerance_based".into(),
+                rs_ions_matched_tolerance_based_col,
+            ),
+            Column::new(
+                "rs_ions_matched_sp_score_based".into(),
+                rs_ions_matched_sp_score_based_col,
+            ),
             Column::new("comet_ions_total".into(), comet_ions_total_col),
             Column::new("rs_ions_total".into(), rs_ions_total_col),
         ])

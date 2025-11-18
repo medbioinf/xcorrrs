@@ -1,9 +1,8 @@
-use ndarray::Array1;
 use rustyms::{
     system::{e, usize::Charge},
     CompoundPeptidoformIon,
     Element::H as Hydrogen,
-    FragmentationModel, MassMode,
+    Fragment, FragmentationModel, MassMode,
 };
 
 use crate::error::Error;
@@ -19,27 +18,48 @@ pub fn dalton_to_mass_to_charge(mass: f64, charge: usize) -> f64 {
     (mass + Hydrogen.mass(None).unwrap().value * charge) / charge
 }
 
-/// Creates a theoretical spectrum from a list of fragments.
+/// Converts mass to charge ration (Thompson) to Dalton
+///
+/// # Arguments
+/// * `mz` - Mass to charge ratio (Thompson)
+/// * `charge` - Charge
+///
+pub fn mass_to_charge_to_dalton(mz: f64, charge: usize) -> f64 {
+    let charge = charge as f64;
+    mz * charge - Hydrogen.mass(None).unwrap().value * charge
+}
+
+/// Creates theoretical fragments for the given peptide using the provided fragmentation model and maximum charge.
 ///
 /// # Arguments
 /// * `peptide` - The peptide for which to generate the theoretical spectrum.
 /// * `fragmentation_model` - The fragmentation model to use for generating fragments.
 /// * `max_charge` - The maximum charge state to consider for the fragments.
 ///
-pub fn create_threoretical_spectrum(
+pub fn create_theoretical_fragments(
     peptide: &CompoundPeptidoformIon,
     fragmentation_model: &FragmentationModel,
     max_charge: usize,
-) -> Result<Array1<f64>, Error> {
-    let mut mz: Vec<f64> = peptide
+) -> Result<Vec<Fragment>, Error> {
+    let mut fragments: Vec<Fragment> = peptide
         .generate_theoretical_fragments(Charge::new::<e>(max_charge), fragmentation_model)
         .into_iter()
-        .filter_map(|f| f.mz(MassMode::Monoisotopic).map(|mz| mz.value))
+        .filter_map(|f| {
+            if f.mz(MassMode::Monoisotopic).is_some() {
+                Some(f)
+            } else {
+                None
+            }
+        })
         .collect();
 
-    mz.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    fragments.sort_by(|a, b| {
+        a.mz(MassMode::Monoisotopic)
+            .partial_cmp(&b.mz(MassMode::Monoisotopic))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    Ok(Array1::from(mz))
+    Ok(fragments)
 }
 
 #[cfg(test)]
@@ -49,6 +69,7 @@ pub mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    use ndarray::Array1;
     use polars::{frame::DataFrame, prelude::*};
 
     /// Just a sanity check to make sure that max charge is uses as is in rustyms

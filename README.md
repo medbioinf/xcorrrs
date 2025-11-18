@@ -16,7 +16,7 @@ Standalone Rust implementation of [Comet's](https://uwpr.github.io/Comet/) XCorr
   > 2008;7(10):4598-4602.    
   > doi:10.1021/pr800420s
 
-This implementation computes an XCorr value closely aligned with the original Comet algorithm. The generation of theoretical fragments relies on the rustyms/rusteomics-mzcore library, enabling full ProForma support. As a result, there may be subtle differences in theoretical fragment calculation compared to Comet's approach, resulting in slightly differences in the Xcorr. 
+This implementation computes an XCorr value closely aligned with the original Comet algorithm. The generation of theoretical fragments relies on the rustyms/rusteomics-mzcore library, enabling full ProForma support. As a result, there may be subtle differences in theoretical fragment calculation compared to Comet's approach, resulting in slightly differences in the Xcorr and number of matched ions.
 
 ## Tests
 For each PSM in `test_files/LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.tsv` the matched peptide is converted to a Proforma String, including PSMs, and matched against the spectrum from the MS run using the xcorr reimplementation. The root means squared error is than calulated on Comet's reported xcorr and the results of the reimplementation (scaled by the highest Xcorr of both implementations). Accepted is a RMSE below 0.0002.

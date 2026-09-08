@@ -1,8 +1,10 @@
-use rustyms::{
-    system::{e, usize::Charge},
-    CompoundPeptidoformIon,
-    Element::H as Hydrogen,
-    Fragment, FragmentationModel, MassMode,
+use mzannotate::{
+    annotation::model::FragmentationModel, fragment::Fragment, prelude::PeptidoformFragmentation,
+};
+use mzcore::{
+    chemistry::{Element::H as Hydrogen, MassMode, OutputMolecularFormula},
+    sequence::PeptidoformIon,
+    system::{e, isize::Charge},
 };
 
 use crate::error::Error;
@@ -37,12 +39,12 @@ pub fn mass_to_charge_to_dalton(mz: f64, charge: usize) -> f64 {
 /// * `max_charge` - The maximum charge state to consider for the fragments.
 ///
 pub fn create_theoretical_fragments(
-    peptide: &CompoundPeptidoformIon,
+    peptidoform_ion: &PeptidoformIon,
     fragmentation_model: &FragmentationModel,
     max_charge: usize,
-) -> Result<Vec<Fragment>, Error> {
-    let mut fragments: Vec<Fragment> = peptide
-        .generate_theoretical_fragments(Charge::new::<e>(max_charge), fragmentation_model)
+) -> Result<Vec<Fragment<OutputMolecularFormula>>, Error> {
+    let mut fragments: Vec<Fragment<OutputMolecularFormula>> = peptidoform_ion
+        .generate_theoretical_fragments(Charge::new::<e>(max_charge as isize), fragmentation_model)
         .into_iter()
         .filter_map(|f| {
             if f.mz(MassMode::Monoisotopic).is_some() {
@@ -66,29 +68,33 @@ pub fn create_theoretical_fragments(
 pub mod tests {
     use crate::configuration::{Configuration, FinalizedConfiguration};
 
+    use mzcore::ontology::Ontologies;
+
     use super::*;
     use std::path::PathBuf;
 
     use ndarray::Array1;
     use polars::{frame::DataFrame, prelude::*};
 
-    /// Just a sanity check to make sure that max charge is uses as is in rustyms
+    /// Just a sanity check to make sure that max charge is uses as is in mzannotate
     #[test]
     fn test_fragment_creation() {
         let max_charge = 6;
         let config: FinalizedConfiguration = Configuration::default().into();
-        let peptide = CompoundPeptidoformIon::pro_forma("DIGSETK", None).unwrap();
+        let peptide = PeptidoformIon::pro_forma("DIGSETK", &Ontologies::empty())
+            .unwrap()
+            .0;
 
         let mut charge_states = vec![false; max_charge + 1];
         charge_states[0] = true; // Charge 0 is not valid, but we use it for indexing
 
         peptide
-            .generate_theoretical_fragments(
-                Charge::new::<e>(max_charge),
+            .generate_theoretical_fragments::<OutputMolecularFormula>(
+                Charge::new::<e>(max_charge as isize),
                 &config.fragmentation_model,
             )
             .iter()
-            .for_each(|f| charge_states[f.charge.value] = true);
+            .for_each(|f| charge_states[f.charge.value as usize] = true);
 
         assert!(charge_states.iter().all(|x| *x));
     }

@@ -1,5 +1,11 @@
+use context_error::BoxedError;
+use mzannotate::fragment::Fragment;
+use mzcore::{
+    chemistry::{AmbiguousMolecule, MassMode, OutputMolecularFormula},
+    ontology::Ontologies,
+    sequence::PeptidoformIon,
+};
 use ndarray::{s, Array1, Axis};
-use rustyms::{CompoundPeptidoformIon, Fragment};
 
 use crate::{
     configuration::FinalizedConfiguration, error::Error, scoring_result::ScoringResult,
@@ -427,10 +433,10 @@ impl FastXcorr<'_> {
     ///
     pub fn create_theoretical_fragments(
         &self,
-        peptide: &CompoundPeptidoformIon,
-    ) -> Result<Vec<Fragment>, Error> {
+        peptidoform_ion: &PeptidoformIon,
+    ) -> Result<Vec<Fragment<OutputMolecularFormula>>, Error> {
         create_theoretical_fragments(
-            peptide,
+            peptidoform_ion,
             &self.config.fragmentation_model,
             self.fragment_charge,
         )
@@ -441,10 +447,12 @@ impl FastXcorr<'_> {
     /// # Arguments
     /// * `theoretical_fragments` - Theoretical fragments to create the spectrum from.
     ///
-    pub fn create_threoretical_mz(theoretical_fragments: &[Fragment]) -> Array1<f64> {
+    pub fn create_threoretical_mz(
+        theoretical_fragments: &[Fragment<OutputMolecularFormula>],
+    ) -> Array1<f64> {
         theoretical_fragments
             .iter()
-            .filter_map(|f| f.mz(rustyms::MassMode::Monoisotopic).map(|mz| mz.value))
+            .filter_map(|f| f.mz(MassMode::Monoisotopic).map(|mz| mz.value))
             .collect::<Array1<f64>>()
     }
 
@@ -453,17 +461,33 @@ impl FastXcorr<'_> {
     /// # Arguments
     /// * `peptide` - The peptide sequence to score.
     ///
-    pub fn xcorr_peptide(&self, peptide: &str) -> Result<ScoringResult, Error> {
-        let peptide = CompoundPeptidoformIon::pro_forma(peptide, None)
-            .map_err(Error::InvalidPeptideSequence)?;
+    pub fn xcorr_peptide(
+        &self,
+        peptide: &str,
+        ontologies: Option<Ontologies>,
+    ) -> Result<ScoringResult, Error> {
+        let ontologies = ontologies.unwrap_or(Ontologies::empty());
+        let (peptidoform_ion, parsing_errors) = PeptidoformIon::pro_forma(peptide, &ontologies)
+            .map_err(|err| {
+                Error::InvalidProForma(err.into_iter().map(BoxedError::to_owned).collect())
+            })?;
+
+        if !parsing_errors.is_empty() {
+            return Err(Error::InvalidProForma(
+                parsing_errors
+                    .into_iter()
+                    .map(BoxedError::to_owned)
+                    .collect(),
+            ));
+        }
 
         let (min_theoretical_mass, max_theoretical_mass) =
-            match peptide.formulas().mass_bounds().into_option() {
+            match peptidoform_ion.formulas().mass_bounds().into_option() {
                 Some((min, max)) => (min.monoisotopic_mass().value, max.monoisotopic_mass().value),
                 None => (-1.0, -1.0),
             };
 
-        let theoretical_fragments = self.create_theoretical_fragments(&peptide)?;
+        let theoretical_fragments = self.create_theoretical_fragments(&peptidoform_ion)?;
         let theoretical_mz = Self::create_threoretical_mz(&theoretical_fragments);
         let ions_total = theoretical_mz.len();
 
@@ -502,7 +526,6 @@ mod tests {
     use ndarray_stats::DeviationExt;
     use polars::prelude::*;
     use rayon::prelude::*;
-    use rustyms::MassMode;
 
     use crate::{
         configuration::{Configuration, FinalizedConfiguration},
@@ -646,7 +669,9 @@ mod tests {
         .unwrap();
 
         if env::var("VERBOSE").is_ok() {
-            let peptide = CompoundPeptidoformIon::pro_forma("DIGSETK", None).unwrap();
+            let peptide = PeptidoformIon::pro_forma("DIGSETK", &Ontologies::empty())
+                .unwrap()
+                .0;
 
             let mut binned_theoretical_spectrum =
                 Array1::zeros(xcorr.preprocessed_experimental_spectrum.len());
@@ -678,7 +703,7 @@ mod tests {
             }
         }
 
-        let scoring = xcorr.xcorr_peptide("DIGSETK").unwrap();
+        let scoring = xcorr.xcorr_peptide("DIGSETK", None).unwrap();
         println!("{scoring}");
         assert_eq!((scoring.score * 100.0).round() / 100.0, 2.92);
     }
@@ -718,7 +743,7 @@ mod tests {
                 let fast_xcorr =
                     FastXcorr::new(&config, (&mz_array, &intensity_array), charge).unwrap();
 
-                let scoring = fast_xcorr.xcorr_peptide(proforma_peptide).unwrap();
+                let scoring = fast_xcorr.xcorr_peptide(proforma_peptide, None).unwrap();
 
                 (
                     scan,

@@ -1,9 +1,7 @@
 use std::{fmt::Display, ops::Deref};
 
-use rustyms::{
-    model::{FragmentationModel, PrimaryIonSeries},
-    molecular_formula, NeutralLoss,
-};
+use mzannotate::annotation::model::{FragmentationModel, PrimaryIonSeries};
+use mzcore::{chemistry::NeutralLoss, molecular_formula};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
@@ -144,15 +142,15 @@ impl From<Configuration> for FinalizedConfiguration {
         if configuration.use_neutral_loss_ions {
             let mut b_ions = fragmentation_model.b.clone();
             b_ions = b_ions.neutral_losses(vec![
-                NeutralLoss::Loss(molecular_formula!(H 2 O 1)),
-                NeutralLoss::Loss(molecular_formula!(N 1 H 3)),
+                NeutralLoss::Loss(1, molecular_formula!(H 2 O 1)),
+                NeutralLoss::Loss(1, molecular_formula!(N 1 H 3)),
             ]);
             fragmentation_model.b = b_ions;
 
             let mut y_ions = fragmentation_model.y.clone();
             y_ions = y_ions.neutral_losses(vec![
-                NeutralLoss::Loss(molecular_formula!(H 2 O 1)),
-                NeutralLoss::Loss(molecular_formula!(N 1 H 3)),
+                NeutralLoss::Loss(1, molecular_formula!(H 2 O 1)),
+                NeutralLoss::Loss(1, molecular_formula!(N 1 H 3)),
             ]);
             fragmentation_model.b = y_ions
         }

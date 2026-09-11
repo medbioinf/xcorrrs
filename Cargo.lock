@@ -2077,6 +2077,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "mzscoring"
+version = "1.3.0"
+dependencies = [
+ "context_error",
+ "dihardts_omicstools",
+ "itertools 0.14.0",
+ "mzannotate",
+ "mzcore",
+ "ndarray",
+ "ndarray-stats",
+ "plotly",
+ "polars",
+ "rayon",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "mzsignal"
 version = "1.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4917,24 +4935,6 @@ name = "writeable"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea2f10b9bb0928dfb1b42b65e1f9e36f7f54dbdf08457afefb38afcdec4fa2bb"
-
-[[package]]
-name = "xcorrrs"
-version = "1.3.0"
-dependencies = [
- "context_error",
- "dihardts_omicstools",
- "itertools 0.14.0",
- "mzannotate",
- "mzcore",
- "ndarray",
- "ndarray-stats",
- "plotly",
- "polars",
- "rayon",
- "serde",
- "thiserror",
-]
 
 [[package]]
 name = "xxhash-rust"

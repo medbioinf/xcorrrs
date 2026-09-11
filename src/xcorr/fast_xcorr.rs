@@ -8,8 +8,8 @@ use mzcore::{
 use ndarray::{s, Array1, Axis};
 
 use crate::{
-    configuration::FinalizedConfiguration, error::Error, scoring_result::ScoringResult,
     utils::create_theoretical_fragments,
+    xcorr::{configuration::FinalizedConfiguration, error::Error, scoring_result::ScoringResult},
 };
 
 /// +/- m/z shift for the xcorr calculation.
@@ -440,6 +440,7 @@ impl FastXcorr<'_> {
             &self.config.fragmentation_model,
             self.fragment_charge,
         )
+        .map_err(|err| Error::TheoreticalSpectrum(Box::new(err)))
     }
 
     /// Creates an array of theoretical m/z values from a list of fragments.
@@ -528,9 +529,11 @@ mod tests {
     use rayon::prelude::*;
 
     use crate::{
-        configuration::{Configuration, FinalizedConfiguration},
-        fast_xcorr::FastXcorr,
         utils::tests::{get_spectrum, read_test_data},
+        xcorr::{
+            configuration::{Configuration, FinalizedConfiguration},
+            fast_xcorr::FastXcorr,
+        },
     };
 
     use super::*;

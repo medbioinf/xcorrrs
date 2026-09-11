@@ -1,3 +1,4 @@
+use context_error::{BasicKind, BoxedError};
 use mzannotate::{
     annotation::model::FragmentationModel, fragment::Fragment, prelude::PeptidoformFragmentation,
 };
@@ -6,8 +7,13 @@ use mzcore::{
     sequence::PeptidoformIon,
     system::{e, isize::Charge},
 };
+use thiserror::Error;
 
-use crate::error::Error;
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Invalid ProForma string: {0:?}")]
+    InvalidProForma(Vec<BoxedError<'static, BasicKind>>),
+}
 
 /// Da to m/z conversion
 ///
@@ -66,7 +72,7 @@ pub fn create_theoretical_fragments(
 
 #[cfg(test)]
 pub mod tests {
-    use crate::configuration::{Configuration, FinalizedConfiguration};
+    use crate::xcorr::configuration::{Configuration, FinalizedConfiguration};
 
     use mzcore::ontology::Ontologies;
 

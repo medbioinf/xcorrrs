@@ -11,4 +11,6 @@ pub enum Error {
     InvalidConfiguration(String),
     #[error("Invalid ProForma string: {0:?}")]
     InvalidProForma(Vec<BoxedError<'static, BasicKind>>),
+    #[error("Unable to create theoretical spectra: {0:?}")]
+    TheoreticalSpectrum(Box<crate::utils::Error>),
 }

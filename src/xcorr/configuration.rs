@@ -4,7 +4,7 @@ use mzannotate::annotation::model::{FragmentationModel, PrimaryIonSeries};
 use mzcore::{chemistry::NeutralLoss, molecular_formula};
 use serde::{Deserialize, Serialize};
 
-use crate::error::Error;
+use crate::xcorr::error::Error;
 
 /// Ion types used in configuration to select which ion series to use
 /// for the fragmentation model.

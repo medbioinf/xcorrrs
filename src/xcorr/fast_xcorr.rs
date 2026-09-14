@@ -580,7 +580,7 @@ mod tests {
                         .to_string()
                         .replace("[15.9949]", "[+15.9949]");
                     if proform_string.contains("C") {
-                        proform_string = proform_string.replace("C", "C[+57.02146]");
+                        proform_string = proform_string.replace("C", "C[+57.021464]");
                     }
                     proform_string
                 })

@@ -519,9 +519,7 @@ impl FastXcorr<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, io::Write};
-
-    use crate::utils::tests::{get_eng_experimental_spectrum, get_eng_fast_xcorr_spectrum};
+    use std::{env, io::Write, path::PathBuf};
 
     use itertools::multiunzip;
     use ndarray_stats::DeviationExt;
@@ -529,7 +527,7 @@ mod tests {
     use rayon::prelude::*;
 
     use crate::{
-        utils::tests::{get_spectrum, read_test_data},
+        utils::tests::get_spectrum,
         xcorr::{
             configuration::{Configuration, FinalizedConfiguration},
             fast_xcorr::FastXcorr,
@@ -537,6 +535,132 @@ mod tests {
     };
 
     use super::*;
+
+    /// Reads the test data from a TSV file and processes it to include a new column for proforma peptides.
+    /// TEST_NUMBER_OF_PSMS environment variable limits to the X best scored PSMs.
+    ///
+    fn read_test_data() -> DataFrame {
+        // Read the Comet results from a TSV file
+        let mut comet_df = CsvReadOptions::default()
+            .with_has_header(true)
+            .with_parse_options(
+                CsvParseOptions::default()
+                    .with_separator(b'\t')
+                    .with_comment_prefix(Some("#")),
+            )
+            .try_into_reader_with_file_path(Some(PathBuf::from(
+                "test_files/LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.comet.tsv",
+            )))
+            .unwrap()
+            .finish()
+            .unwrap();
+
+        // Sort by xcorr in descending order
+        comet_df
+            .sort_in_place(
+                ["xcorr"],
+                SortMultipleOptions::default().with_order_descending(true),
+            )
+            .unwrap();
+
+        // Reduce the number of PSMs if the environment variable is set
+        let mut comet_df = match std::env::var("TEST_NUMBER_OF_PSMS") {
+            Ok(number_of_psms) => comet_df.slice(0, number_of_psms.parse::<usize>().unwrap()),
+            Err(_) => comet_df,
+        };
+
+        // Create the proforma peptides column
+        let modified_peptide = comet_df.column("modified_peptide").unwrap().str().unwrap();
+        let profoma_peptides = modified_peptide
+            .iter()
+            .filter_map(|s| {
+                s.map(|s| {
+                    let mut proform_string = s[2..s.len() - 2]
+                        .to_string()
+                        .replace("[15.9949]", "[+15.9949]");
+                    if proform_string.contains("C") {
+                        proform_string = proform_string.replace("C", "C[+57.02146]");
+                    }
+                    proform_string
+                })
+            })
+            .collect::<Vec<String>>();
+
+        comet_df
+            .with_column(
+                Series::new("proforma_peptide".into(), profoma_peptides)
+                    .cast(&DataType::String)
+                    .unwrap(),
+            )
+            .unwrap();
+
+        comet_df
+    }
+
+    /// Reads the experimental spectrum Eng provided for the peptide DIGSETK.
+    ///
+    pub fn get_eng_experimental_spectrum() -> (Array1<f64>, Array1<f64>) {
+        let spec_df =
+            ParquetReader::new(std::fs::File::open("test_files/eng/DIGSETK.parquet").unwrap())
+                .read_parallel(ParallelStrategy::None)
+                .finish()
+                .unwrap();
+
+        let mz_array = spec_df["mz"]
+            .f64()
+            .unwrap()
+            .to_ndarray()
+            .unwrap()
+            .to_owned();
+
+        let intensity_array = spec_df["intensity"]
+            .f64()
+            .unwrap()
+            .to_ndarray()
+            .unwrap()
+            .to_owned();
+
+        (mz_array, intensity_array)
+    }
+
+    /// Reads the partial xcorr spectrum and the index provided by Eng.
+    /// Return is a tuple with the index and the fast xcorr values.
+    ///
+    pub fn get_eng_fast_xcorr_spectrum() -> (Array1<usize>, Array1<f64>) {
+        let spec_df = CsvReadOptions::default()
+            .with_has_header(true)
+            .with_rechunk(true)
+            .with_parse_options(
+                CsvParseOptions::default()
+                    .with_separator(b'\t')
+                    .with_comment_prefix(Some("#")),
+            )
+            .try_into_reader_with_file_path(Some(PathBuf::from(
+                "test_files/eng/DIGSETK.process.tsv",
+            )))
+            .unwrap()
+            .finish()
+            .unwrap();
+
+        (
+            spec_df
+                .column("index")
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_ndarray()
+                .unwrap()
+                .mapv(|x| x as usize),
+            spec_df
+                .column("fast_xcorr")
+                .unwrap()
+                .f64()
+                .unwrap()
+                .to_ndarray()
+                .unwrap()
+                .to_owned(),
+        )
+    }
 
     /// Checks the Xcorr spectrum (y-prime) against the data provided by Eng
     ///

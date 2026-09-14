@@ -465,10 +465,11 @@ impl FastXcorr<'_> {
     pub fn xcorr_peptide(
         &self,
         peptide: &str,
-        ontologies: Option<Ontologies>,
+        ontologies: Option<&Ontologies>,
     ) -> Result<ScoringResult, Error> {
-        let ontologies = ontologies.unwrap_or(Ontologies::empty());
-        let (peptidoform_ion, parsing_errors) = PeptidoformIon::pro_forma(peptide, &ontologies)
+        let empty_ontologies = Ontologies::empty();
+        let ontologies = ontologies.unwrap_or(&empty_ontologies);
+        let (peptidoform_ion, parsing_errors) = PeptidoformIon::pro_forma(peptide, ontologies)
             .map_err(|err| {
                 Error::InvalidProForma(err.into_iter().map(BoxedError::to_owned).collect())
             })?;

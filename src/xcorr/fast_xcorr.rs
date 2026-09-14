@@ -953,6 +953,18 @@ mod tests {
                 xcorrrs_df["comet_xcorr"].f64().unwrap().to_vec(),
                 xcorrrs_df["rs_xcorr"].f64().unwrap().to_vec(),
             )
+            .hover_text_array(
+                xcorrrs_df["scan"]
+                    .i64()
+                    .unwrap()
+                    .iter()
+                    .map(|scan_opt| {
+                        scan_opt
+                            .map(|scan| format!("scan = {}", scan))
+                            .unwrap_or_else(|| "scan = N/A".to_string())
+                    })
+                    .collect::<Vec<String>>(),
+            )
             .mode(plotly::common::Mode::Markers)
             .marker(plotly::common::Marker::default().color("blue"))
             .show_legend(false);
@@ -962,7 +974,7 @@ mod tests {
 
             plot.set_layout(
                 plotly::Layout::new()
-                    .title("Comet xcorr vs rs_xcorr")
+                    .title("Comet xcorr vs mzscoring xcorr")
                     .x_axis(
                         plotly::layout::Axis::new()
                             .title("Comet xcorr")
@@ -970,7 +982,7 @@ mod tests {
                     )
                     .y_axis(
                         plotly::layout::Axis::new()
-                            .title("rs_xcorr")
+                            .title("mzscoring xcorr")
                             .scale_anchor("x"),
                     ),
             );

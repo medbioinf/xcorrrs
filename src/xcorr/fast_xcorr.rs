@@ -922,14 +922,28 @@ mod tests {
             .finish(&mut xcorrrs_df)
             .unwrap();
 
+        let comet_xcorr_max = xcorrrs_df
+            .column("comet_xcorr")
+            .unwrap()
+            .f64()
+            .unwrap()
+            .max()
+            .unwrap();
+
+        let fast_xcorrrs_max = xcorrrs_df
+            .column("rs_xcorr")
+            .unwrap()
+            .f64()
+            .unwrap()
+            .max()
+            .unwrap();
+
+        let max_score = comet_xcorr_max.max(fast_xcorrrs_max);
+
         if env::var("VERBOSE").is_ok() {
-            let max_comet_xcorr = xcorrrs_df["comet_xcorr"].f64().unwrap().max().unwrap();
-
-            let max_calculated_xcorr = xcorrrs_df["rs_xcorr"].f64().unwrap().max().unwrap();
-
             let mut plot = plotly::Plot::new();
             let diagonal_trace =
-                plotly::Scatter::new(vec![0.0, max_comet_xcorr], vec![0.0, max_calculated_xcorr])
+                plotly::Scatter::new(vec![0.0, comet_xcorr_max], vec![0.0, fast_xcorrrs_max])
                     .mode(plotly::common::Mode::Lines)
                     .marker(plotly::common::Marker::default().color("red"))
                     .hover_info(plotly::common::HoverInfo::None)
@@ -964,24 +978,6 @@ mod tests {
         }
 
         // Normalize comet xcorrs and calculates xcorrs
-
-        let comet_xcorr_max = xcorrrs_df
-            .column("comet_xcorr")
-            .unwrap()
-            .f64()
-            .unwrap()
-            .max()
-            .unwrap();
-
-        let fast_xcorrrs_max = xcorrrs_df
-            .column("rs_xcorr")
-            .unwrap()
-            .f64()
-            .unwrap()
-            .max()
-            .unwrap();
-
-        let max_score = comet_xcorr_max.max(fast_xcorrrs_max);
 
         let scaled_comet_xcorr = xcorrrs_df
             .column("comet_xcorr")

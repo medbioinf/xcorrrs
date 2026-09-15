@@ -20,6 +20,7 @@ context_error = "0.3.0"
 mzannotate = "0.2.0"
 mzcore = "0.2.0"
 ndarray = "0.16.1"
+ordered-float = "5.5.0"
 serde = "1.0.219"
 thiserror = "2.0.12"
 

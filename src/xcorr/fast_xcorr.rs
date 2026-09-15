@@ -873,6 +873,13 @@ mod tests {
 
                 let scoring = fast_xcorr.xcorr_peptide(proforma_peptide, None).unwrap();
 
+                // if scan == 84616 {
+                //     println!(
+                //         "scan = 84616, {proforma_peptide}/{charge}, ions_matched = {}, ions_total = {}, mzscore = {}, comet = {}",
+                //         scoring.ions_matched, scoring.ions_total, scoring.score, comet_xcorr
+                //     );
+                // }
+
                 (
                     scan,
                     proforma_peptide.to_string(),

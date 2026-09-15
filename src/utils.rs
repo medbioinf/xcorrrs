@@ -1,18 +1,119 @@
+use std::fmt::Display;
+
 use context_error::{BasicKind, BoxedError};
 use mzannotate::{
-    annotation::model::FragmentationModel, fragment::Fragment, prelude::PeptidoformFragmentation,
+    annotation::model::{FragmentationModel, PrimaryIonSeries},
+    fragment::Fragment,
+    prelude::PeptidoformFragmentation,
 };
 use mzcore::{
-    chemistry::{Element::H as Hydrogen, MassMode, OutputMolecularFormula},
+    chemistry::{Element::H as Hydrogen, MassMode, NeutralLoss, OutputMolecularFormula},
+    molecular_formula,
     sequence::PeptidoformIon,
     system::{e, isize::Charge},
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Invalid ProForma string: {0:?}")]
     InvalidProForma(Vec<BoxedError<'static, BasicKind>>),
+    #[error("Invalid configuration: {0}")]
+    InvalidConfiguration(String),
+}
+
+/// Ion types used in configuration to select which ion series to use
+/// for the fragmentation model. Shared between the `xcorr` and `msamanda` scorers.
+///
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Ion {
+    A,
+    B,
+    C,
+    X,
+    Y,
+    Z,
+}
+
+impl Display for Ion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Ion::A => write!(f, "A"),
+            Ion::B => write!(f, "B"),
+            Ion::C => write!(f, "C"),
+            Ion::X => write!(f, "X"),
+            Ion::Y => write!(f, "Y"),
+            Ion::Z => write!(f, "Z"),
+        }
+    }
+}
+
+impl TryFrom<String> for Ion {
+    type Error = Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.to_ascii_uppercase().as_str() {
+            "A" => Ok(Ion::A),
+            "B" => Ok(Ion::B),
+            "C" => Ok(Ion::C),
+            "X" => Ok(Ion::X),
+            "Y" => Ok(Ion::Y),
+            "Z" => Ok(Ion::Z),
+            _ => Err(Self::Error::InvalidConfiguration(format!(
+                "Unknown ion type: {value}",
+            ))),
+        }
+    }
+}
+
+/// Builds a `FragmentationModel` from the selected ion series and whether to include
+/// the common neutral-loss variants (water/ammonia) on b/y ions.
+///
+pub fn build_fragmentation_model(ions: &[Ion], use_neutral_loss_ions: bool) -> FragmentationModel {
+    let mut fragmentation_model = FragmentationModel::none().clone();
+
+    if ions.contains(&Ion::A) {
+        fragmentation_model.a = PrimaryIonSeries::default();
+    };
+
+    if ions.contains(&Ion::B) {
+        fragmentation_model.b = PrimaryIonSeries::default();
+    };
+
+    if ions.contains(&Ion::C) {
+        fragmentation_model.c = PrimaryIonSeries::default();
+    };
+
+    if ions.contains(&Ion::X) {
+        fragmentation_model.x = PrimaryIonSeries::default();
+    };
+
+    if ions.contains(&Ion::Y) {
+        fragmentation_model.y = PrimaryIonSeries::default();
+    };
+
+    if ions.contains(&Ion::Z) {
+        fragmentation_model.z = PrimaryIonSeries::default();
+    };
+
+    if use_neutral_loss_ions {
+        let mut b_ions = fragmentation_model.b.clone();
+        b_ions = b_ions.neutral_losses(vec![
+            NeutralLoss::Loss(1, molecular_formula!(H 2 O 1)),
+            NeutralLoss::Loss(1, molecular_formula!(N 1 H 3)),
+        ]);
+        fragmentation_model.b = b_ions;
+
+        let mut y_ions = fragmentation_model.y.clone();
+        y_ions = y_ions.neutral_losses(vec![
+            NeutralLoss::Loss(1, molecular_formula!(H 2 O 1)),
+            NeutralLoss::Loss(1, molecular_formula!(N 1 H 3)),
+        ]);
+        fragmentation_model.b = y_ions
+    }
+
+    fragmentation_model
 }
 
 /// Da to m/z conversion

@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 
 use context_error::{BasicKind, BoxedError};
-use mzannotate::{annotation::model::FragmentationModel, fragment::FragmentType};
+use mzannotate::fragment::FragmentType;
 use mzcore::{
     chemistry::{AmbiguousMolecule, MassMode, Molecule},
     molecular_formula,
@@ -16,7 +17,7 @@ use thiserror::Error;
 
 use crate::{
     msamanda::deconvolution::{get_mass_index, Spectrum},
-    utils::{build_fragmentation_model, create_theoretical_fragments, Ion},
+    utils::{create_theoretical_fragments, FragmentIonConfiguration, HasFragmentIonConfiguration},
 };
 
 /// Configuration for the MS Amanda scoring algorithm.
@@ -27,12 +28,10 @@ pub struct Configuration {
     /// Fragment ion mass tolerance, used both to match theoretical ions against picked peaks
     /// and to strip the precursor peak from the spectrum.
     pub fragment_tolerance: Tolerance<MassOverCharge>,
-    /// Maximum charge state to consider for theoretical fragment ions.
-    pub max_fragment_charge: usize,
-    /// Ions to use in the fragmentation model.
-    pub ions: Vec<Ion>,
-    /// Whether to include water/ammonia neutral-loss variants of b/y ions.
-    pub use_neutral_loss_ions: bool,
+    /// Fragment-ion selection shared across scoring algorithms: max fragment charge, ion
+    /// series, and whether to include water/ammonia neutral-loss variants of b/y ions.
+    #[serde(flatten)]
+    pub common: FragmentIonConfiguration,
     /// Whether to consider the methionine-sulfoxide neutral loss (-CH4OS, ~64 Da) as an extra
     /// candidate ion for any b/y fragment that spans an oxidized methionine residue. This is a
     /// collision-induced side-chain loss (vibrational excitation), so it is only chemically
@@ -51,14 +50,26 @@ pub struct Configuration {
     pub remove_precursor: bool,
 }
 
+impl Deref for Configuration {
+    type Target = FragmentIonConfiguration;
+
+    fn deref(&self) -> &Self::Target {
+        &self.common
+    }
+}
+
+impl HasFragmentIonConfiguration for Configuration {
+    fn fragment_ion_configuration(&self) -> &FragmentIonConfiguration {
+        &self.common
+    }
+}
+
 impl Default for Configuration {
     /// Default is for high mass accuracy MS2 data, matching the paper's recommended setup.
     fn default() -> Self {
         Self {
             fragment_tolerance: Tolerance::new_ppm(10.0),
-            max_fragment_charge: 3,
-            ions: vec![Ion::B, Ion::Y],
-            use_neutral_loss_ions: false,
+            common: FragmentIonConfiguration::default(),
             use_methionine_sulfoxide_neutral_loss: false,
             min_m: 1,
             max_m: 10,
@@ -69,39 +80,7 @@ impl Default for Configuration {
 }
 
 /// Finalized configuration for the MS Amanda algorithm, carrying the built `FragmentationModel`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FinalizedConfiguration {
-    /// Fragmentation model built from the selected ions.
-    pub fragmentation_model: FragmentationModel,
-    /// Original configuration that was used to create this finalized configuration.
-    configuration: Configuration,
-}
-
-impl std::ops::Deref for FinalizedConfiguration {
-    type Target = Configuration;
-
-    fn deref(&self) -> &Self::Target {
-        &self.configuration
-    }
-}
-
-impl From<Configuration> for FinalizedConfiguration {
-    fn from(configuration: Configuration) -> Self {
-        let fragmentation_model =
-            build_fragmentation_model(&configuration.ions, configuration.use_neutral_loss_ions);
-
-        Self {
-            fragmentation_model,
-            configuration,
-        }
-    }
-}
-
-impl Default for FinalizedConfiguration {
-    fn default() -> Self {
-        Configuration::default().into()
-    }
-}
+pub type FinalizedConfiguration = crate::utils::Finalized<Configuration>;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -734,7 +713,10 @@ mod tests {
             // MS Amanda run's fragment tolerance used to generate the ground-truth TSV.
             fragment_tolerance: Tolerance::new_absolute(MassOverCharge::new::<thomson>(0.02)),
             // Matches `test_files/settings.xml`'s `<MaxAllowedChargeState>4+</MaxAllowedChargeState>`.
-            max_fragment_charge: 4,
+            common: FragmentIonConfiguration {
+                max_fragment_charge: 4,
+                ..FragmentIonConfiguration::default()
+            },
             // This dataset is a CID/HCD (b/y ion) search per `settings.xml`'s
             // `<Instrument>b, y</Instrument>`, and its `MaxNumberNeutralLossModifications`
             // setting means modification-specific losses like methionine-sulfoxide were

@@ -840,7 +840,10 @@ mod tests {
 
                 let config: FinalizedConfiguration = Configuration {
                     use_flanking_peaks: true,
-                    max_fragment_charge: 5,
+                    common: crate::utils::FragmentIonConfiguration {
+                        max_fragment_charge: 5,
+                        ..crate::utils::FragmentIonConfiguration::default()
+                    },
                     ..Configuration::default()
                 }
                 .into();

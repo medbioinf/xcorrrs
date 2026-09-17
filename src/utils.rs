@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::ops::Deref;
 
 use context_error::{BasicKind, BoxedError};
 use mzannotate::{
@@ -176,10 +177,83 @@ pub fn build_fragmentation_model(ions: &[Ion], use_neutral_loss_ions: bool) -> F
             NeutralLoss::Loss(1, molecular_formula!(H 2 O 1)),
             NeutralLoss::Loss(1, molecular_formula!(N 1 H 3)),
         ]);
-        fragmentation_model.b = y_ions
+        fragmentation_model.y = y_ions
     }
 
     fragmentation_model
+}
+
+/// Fragment-ion selection shared by every scoring algorithm's configuration: which ion series
+/// to generate, whether to include their water/ammonia neutral-loss variants, and the maximum
+/// charge state to consider for theoretical fragments.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FragmentIonConfiguration {
+    /// Maximum charge state to consider for theoretical fragment ions.
+    pub max_fragment_charge: usize,
+    /// Ions to use in the fragmentation model.
+    pub ions: Vec<Ion>,
+    /// Whether to include water/ammonia neutral-loss variants of b/y ions.
+    pub use_neutral_loss_ions: bool,
+}
+
+impl Default for FragmentIonConfiguration {
+    fn default() -> Self {
+        Self {
+            max_fragment_charge: 3,
+            ions: vec![Ion::B, Ion::Y],
+            use_neutral_loss_ions: false,
+        }
+    }
+}
+
+impl FragmentIonConfiguration {
+    /// Builds the `FragmentationModel` implied by this configuration's ion selection.
+    pub fn build_fragmentation_model(&self) -> FragmentationModel {
+        build_fragmentation_model(&self.ions, self.use_neutral_loss_ions)
+    }
+}
+
+/// Implemented by every scoring algorithm's `Configuration` type to expose the fragment-ion
+/// selection shared across algorithms, so [`Finalized`] can build a `FragmentationModel` from it
+/// generically.
+pub trait HasFragmentIonConfiguration {
+    fn fragment_ion_configuration(&self) -> &FragmentIonConfiguration;
+}
+
+/// A scoring algorithm's `Configuration`, finalized with the `FragmentationModel` built from its
+/// fragment-ion selection. Shared by every scoring algorithm to avoid re-implementing this
+/// wrapper (and its `FragmentationModel` construction) per algorithm.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Finalized<C> {
+    /// Fragmentation model built from the selected ions.
+    pub fragmentation_model: FragmentationModel,
+    /// Original configuration that was used to create this finalized configuration.
+    configuration: C,
+}
+
+impl<C> Deref for Finalized<C> {
+    type Target = C;
+
+    fn deref(&self) -> &Self::Target {
+        &self.configuration
+    }
+}
+
+impl<C: HasFragmentIonConfiguration> From<C> for Finalized<C> {
+    fn from(configuration: C) -> Self {
+        let fragmentation_model = configuration.fragment_ion_configuration().build_fragmentation_model();
+
+        Self {
+            fragmentation_model,
+            configuration,
+        }
+    }
+}
+
+impl<C: HasFragmentIonConfiguration + Default> Default for Finalized<C> {
+    fn default() -> Self {
+        C::default().into()
+    }
 }
 
 /// Da to m/z conversion

@@ -3,7 +3,7 @@ use std::fmt::Display;
 use context_error::{BasicKind, BoxedError};
 use mzannotate::{
     annotation::model::{FragmentationModel, PrimaryIonSeries},
-    fragment::Fragment,
+    fragment::{Fragment, FragmentType},
     prelude::PeptidoformFragmentation,
 };
 use mzcore::{
@@ -154,7 +154,12 @@ pub fn create_theoretical_fragments(
         .generate_theoretical_fragments(Charge::new::<e>(max_charge as isize), fragmentation_model)
         .into_iter()
         .filter_map(|f| {
-            if f.mz(MassMode::Monoisotopic).is_some() {
+            // `mzannotate` unconditionally appends one intact-precursor "fragment" per
+            // peptide regardless of the fragmentation model; Comet's xcorr ion ladder
+            // never includes such a peak, so it must be excluded here.
+            if matches!(f.ion, FragmentType::Precursor) {
+                None
+            } else if f.mz(MassMode::Monoisotopic).is_some() {
                 Some(f)
             } else {
                 None

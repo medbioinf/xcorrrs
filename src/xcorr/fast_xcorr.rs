@@ -123,10 +123,11 @@ impl FastXcorr<'_> {
         // Normalization of the binned experimental spectrum
         let binned_normalized_experimental_spectrum = Self::experimental_spectrum_normalization(
             mz_max,
-            binned_experimental_spectrum,
+            &binned_experimental_spectrum,
             config.bin_size,
             config.bin_offset,
             config.use_flanking_peaks,
+            max_intensity_sqrt,
         )?;
 
         let preprocessed_experimental_spectrum =
@@ -195,46 +196,56 @@ impl FastXcorr<'_> {
         Ok(binned_spectrum)
     }
 
-    /// Normalizes the binned experimental spectrum according to Comet's normalization procedure.
+    /// Normalizes the binned experimental spectrum according to Comet's normalization procedure
+    /// (`CometPreprocess::MakeCorrData`).
     ///
     /// # Arguments
     /// * `mz_max` - The maximum m/z value in the experimental spectrum.
-    /// * `binned_theoretical_spectrum` - The binned theoretical spectrum to be normalized.
+    /// * `binned_experimental_spectrum` - The binned, raw (unnormalized) experimental spectrum.
     /// * `bin_size` - The size of the bins used for binning the experimental spectrum.
     /// * `bin_offset` - The offset in m/z to be applied before binning.
     /// * `use_flanking_peaks` - Whether to use flanking peaks (half the intensity on both sides) in the normalization.
+    /// * `highest_intensity` - The maximum (sqrt) intensity across the whole binned spectrum, used
+    ///   as the basis for the 5% noise cutoff (Comet compares against the spectrum-wide maximum,
+    ///   not the local window maximum).
     ///
     pub fn experimental_spectrum_normalization(
         mz_max: f64,
-        mut binned_theoretical_spectrum: Array1<f64>,
+        binned_experimental_spectrum: &Array1<f64>,
         bin_size: f64,
         bin_offset: f64,
         use_flanking_peaks: bool,
+        highest_intensity: f64,
     ) -> Result<Array1<f64>, Error> {
         let highest_ion = Self::calc_binned_position(mz_max, bin_size, bin_offset);
         let windows_size = (highest_ion as f64 / NUM_WINDOWS_FOR_NORMALIZATION as f64) as usize + 1;
+        // Comet only keeps bins that exceed 5% of the *spectrum-wide* maximum intensity; every
+        // other bin is dropped to zero rather than left at its raw (unnormalized) value.
+        let intensity_cutoff = 0.05 * highest_intensity;
 
-        for window_start in (0..binned_theoretical_spectrum.len()).step_by(windows_size) {
-            let window_end = (window_start + windows_size).min(binned_theoretical_spectrum.len());
-            let mut window = binned_theoretical_spectrum.slice_mut(s![window_start..window_end]);
+        let mut normalized_spectrum = Array1::zeros(binned_experimental_spectrum.len());
+
+        for window_start in (0..binned_experimental_spectrum.len()).step_by(windows_size) {
+            let window_end = (window_start + windows_size).min(binned_experimental_spectrum.len());
+            let window = binned_experimental_spectrum.slice(s![window_start..window_end]);
 
             let window_max = window.iter().fold(f64::NEG_INFINITY, |acc, &x| acc.max(x));
-            // Comet is only normalizing if the value is greater than 0.05 of the window's maximum intensity
-            let window_intensity_cutoff = 0.05 * window_max;
-            window.mapv_inplace(|value| {
-                if value <= window_intensity_cutoff {
-                    value
-                } else {
-                    value / window_max * 50.0
+
+            if window_max > 0.0 {
+                let scale = 50.0 / window_max;
+                for (offset, &value) in window.iter().enumerate() {
+                    if value > intensity_cutoff {
+                        normalized_spectrum[window_start + offset] = value * scale;
+                    }
                 }
-            });
+            }
         }
 
         if !use_flanking_peaks {
-            Ok(binned_theoretical_spectrum)
+            Ok(normalized_spectrum)
         } else {
-            let mut flanked_binned_spectrum = Array1::zeros(binned_theoretical_spectrum.len());
-            binned_theoretical_spectrum
+            let mut flanked_binned_spectrum = Array1::zeros(normalized_spectrum.len());
+            normalized_spectrum
                 .into_iter()
                 .enumerate()
                 .for_each(|(i, value)| {
@@ -718,13 +729,18 @@ mod tests {
             )
             .unwrap();
 
+            let highest_intensity = binned_experimental_spectrum
+                .iter()
+                .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+
             let mut binned_normalized_experimental_spectrum =
                 FastXcorr::experimental_spectrum_normalization(
                     max_mz,
-                    binned_experimental_spectrum,
+                    &binned_experimental_spectrum,
                     config.bin_size,
                     config.bin_offset,
                     config.use_flanking_peaks,
+                    highest_intensity,
                 )
                 .unwrap();
 
@@ -836,7 +852,6 @@ mod tests {
         assert_eq!((scoring.score * 100.0).round() / 100.0, 2.92);
     }
 
-    // Test xcorr implementations agains high-res MS data
     #[test]
     fn test_xcorr() {
         let comet_df = read_test_data();

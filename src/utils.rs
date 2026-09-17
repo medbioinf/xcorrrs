@@ -254,7 +254,6 @@ pub mod tests {
         ArrayType, BinaryArrayMap, BinaryDataArrayType, DataArray, Precursor, RawSpectrum,
         SelectedIon, SpectrumDescription,
     };
-    use polars::prelude::*;
 
     /// Just a sanity check to make sure that max charge is used as is in mzannotate
     #[test]
@@ -279,32 +278,16 @@ pub mod tests {
         assert!(charge_states.iter().all(|x| *x));
     }
 
-    /// Reads a spectrum from a Parquet file.
+    /// Reads a spectrum from its postcard/zstd fixture file.
     ///
     /// # Arguments
     /// * `scan` - The scan number to read the spectrum for.
     ///
-    pub fn get_spectrum(scan: &str) -> (Vec<f64>, Vec<f64>) {
-        let spec_df = ParquetReader::new(
-            std::fs::File::open(format!("test_files/spectra/scan_{scan}.parquet")).unwrap(),
-        )
-        .read_parallel(ParallelStrategy::None)
-        .finish()
-        .unwrap();
-
-        let mz_array = spec_df["mz"]
-            .f64()
-            .unwrap()
-            .into_no_null_iter()
-            .collect::<Vec<f64>>();
-
-        let intensity_array = spec_df["intensity"]
-            .f64()
-            .unwrap()
-            .into_no_null_iter()
-            .collect::<Vec<f64>>();
-
-        (mz_array, intensity_array)
+    pub fn get_spectrum(scan: &str) -> mzdata::spectrum::Spectrum {
+        let compressed =
+            std::fs::read(format!("test_files/spectra/scan_{scan}.postcard.zst")).unwrap();
+        let bytes = zstd::decode_all(compressed.as_slice()).unwrap();
+        postcard::from_bytes(&bytes).unwrap()
     }
 
     /// Builds a raw (unpicked) [`mzdata`] spectrum from parallel m/z + intensity arrays, plus the
@@ -372,59 +355,36 @@ pub mod tests {
         sum_sq / a.len() as f64
     }
 
-    // TODO: Replace with omicstools with mzdata and make it independent of comet's test data
-    // /// Extracts spectru, data arrays from the mzML file and saves them as Parquet files without any further metadata
-    // /// Important do not set TEST_NUMBER_OF_PSMS environment variable, as this will limit the spectrum extraction to a certain number of scans.
-    // ///
-    // #[test]
-    // #[ignore = "Spectrum extration."]
-    // fn spectrum_extraction() {
-    //     let comet_df = read_test_data();
+    /// One-time fixture migration: extracts every MS2 spectrum from the source mzML (via
+    /// `mzdata`) and writes each one out as `test_files/spectra/scan_<N>.postcard.zst`
+    /// (postcard-serialized, then zstd-compressed), independent of whatever fixtures already
+    /// exist in that directory. Requires
+    /// `LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.mzML` (gitignored, ~1.5GB) at the repo root.
+    #[test]
+    #[ignore = "Fixture migration, requires the source mzML file locally."]
+    fn spectrum_extraction() {
+        use mzdata::prelude::*;
+        use mzdata::MZReader;
 
-    //     let mut mzml_byte_reader = std::io::BufReader::new(
-    //         std::fs::File::open("test_files/LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.mzML")
-    //             .unwrap(),
-    //     );
-    //     let mut mzml = dihardts_omicstools::proteomics::io::mzml::reader::Reader::read_indexed(
-    //         &mut mzml_byte_reader,
-    //         None,
-    //         true,
-    //         false,
-    //     )
-    //     .unwrap();
+        let reader: MZReader<std::fs::File> =
+            MZReader::open_path("LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.mzML").unwrap();
 
-    //     for i in 0..comet_df.height() {
-    //         let scan = comet_df["scan"].i64().unwrap().get(i).unwrap();
+        for spectrum in reader {
+            if spectrum.ms_level() != 2 {
+                continue;
+            }
 
-    //         let binary_data_array_list = mzml
-    //             .get_spectrum(&format!("controllerType=0 controllerNumber=1 scan={scan}"))
-    //             .unwrap()
-    //             .binary_data_array_list;
+            // Native IDs look like "controllerType=0 controllerNumber=1 scan=<N>"; `get_spectrum`
+            // and the existing fixture naming convention key off the trailing scan number alone.
+            let scan = spectrum.id().rsplit("scan=").next().unwrap();
 
-    //         let mz_array = binary_data_array_list
-    //             .get_mz_array()
-    //             .unwrap()
-    //             .deflate_data()
-    //             .unwrap();
-    //         let intensity_array = binary_data_array_list
-    //             .get_intensity_array()
-    //             .unwrap()
-    //             .deflate_data()
-    //             .unwrap();
-
-    //         let mut spec_frame = DataFrame::new(vec![
-    //             Column::new("mz".into(), mz_array),
-    //             Column::new("intensity".into(), intensity_array),
-    //         ])
-    //         .unwrap();
-
-    //         let writer = ParquetWriter::new(
-    //             std::fs::File::create(format!("test_files/spectra/scan_{scan}.parquet")).unwrap(),
-    //         )
-    //         .with_compression(ParquetCompression::Zstd(Some(
-    //             ZstdLevel::try_new(22).unwrap(),
-    //         )));
-    //         writer.finish(&mut spec_frame).unwrap();
-    //     }
-    // }
+            let bytes = postcard::to_stdvec(&spectrum).unwrap();
+            let compressed = zstd::encode_all(bytes.as_slice(), 19).unwrap();
+            std::fs::write(
+                format!("test_files/spectra/scan_{scan}.postcard.zst"),
+                compressed,
+            )
+            .unwrap();
+        }
+    }
 }

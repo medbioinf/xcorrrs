@@ -122,11 +122,11 @@ pub enum Error {
 /// Result of scoring a single peptide against a spectrum with MS Amanda.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MSAmandaScoringResult {
-    /// `-10 * log10(p_value / explained_ion_current)`.
+    /// Eq (7): `-10 * log10(p_value / explained_ion_current)`.
     pub score: f64,
-    /// Cumulative binomial probability of matching `ions_matched` picked peaks by chance.
+    /// Eq (1): cumulative binomial probability of matching `ions_matched` picked peaks by chance.
     pub p_value: f64,
-    /// Fraction of picked-peak intensity explained by matched peaks (`eif`).
+    /// Eq (6): fraction of picked-peak intensity explained by matched peaks (`eif`).
     pub explained_ion_current: f64,
     /// Number of picked peaks (`N`) at the winning peak-picking depth.
     pub picked_peaks: usize,
@@ -182,8 +182,9 @@ struct WindowedPeaks {
     windows: Vec<Vec<PickedPeak>>,
 }
 
-/// Buckets every peak of `spectrum` into `window_width`-wide windows (anchored at the
-/// spectrum's lowest m/z), sorting each window by intensity descending.
+/// Peak picking (paper, preprocessing step before eq 1): buckets every peak of `spectrum` into
+/// `window_width`-wide windows (anchored at the spectrum's lowest m/z, 100 Da per paper),
+/// sorting each window by intensity descending so [`pick_peaks`] can keep the top `m`.
 fn window_peaks(spectrum: &Spectrum, window_width: f64) -> Option<WindowedPeaks> {
     let min_mz = spectrum.masses.iter().next().copied()?.into_inner();
 
@@ -217,7 +218,8 @@ fn window_peaks(spectrum: &Spectrum, window_width: f64) -> Option<WindowedPeaks>
     })
 }
 
-/// Picks the `m` most intense peaks per window, merged and sorted by m/z ascending.
+/// Peak picking (paper, preprocessing step before eq 1): picks the `m` most intense peaks per
+/// window, merged and sorted by m/z ascending.
 fn pick_peaks(windowed: &WindowedPeaks, m: usize) -> Vec<PickedPeak> {
     let mut picked: Vec<PickedPeak> = windowed
         .windows
@@ -228,7 +230,10 @@ fn pick_peaks(windowed: &WindowedPeaks, m: usize) -> Vec<PickedPeak> {
     picked
 }
 
-/// Total width covered by the union of (possibly overlapping) `[lower, upper]` intervals.
+/// Eq (3) numerator (`|F|*2t - O(F)`, using eq (4)-(5)'s `O(F)`): total width covered by the
+/// union of (possibly overlapping) `[lower, upper]` theoretical-ion tolerance intervals.
+/// Computed directly as an interval-union merge instead of `|F|*2t` minus the paper's sequential
+/// pairwise-sum overlap `O(F)`, but gives the same total for sorted, possibly-chained overlaps.
 fn union_width(mut intervals: Vec<(f64, f64)>) -> f64 {
     if intervals.is_empty() {
         return 0.0;
@@ -250,8 +255,9 @@ fn union_width(mut intervals: Vec<(f64, f64)>) -> f64 {
     total
 }
 
-/// Cumulative binomial probability of matching at least `n` out of `capital_n` trials, each
-/// with success probability `p`: `P(X >= n) = sum_{i=n}^{capital_n} C(capital_n,i) p^i (1-p)^(capital_n-i)`.
+/// Eq (1): `P(n,p,N)`, cumulative binomial probability of matching at least `n` out of
+/// `capital_n` trials, each with success probability `p`:
+/// `P(X >= n) = sum_{i=n}^{capital_n} C(capital_n,i) p^i (1-p)^(capital_n-i)`.
 ///
 /// Computed via a forward recurrence in log-space (`pmf(i+1) = pmf(i) * (N-i)/(i+1) * p/(1-p)`)
 /// instead of evaluating binomial coefficients directly, to stay numerically stable for large
@@ -471,6 +477,8 @@ impl MSAmanda<'_> {
 
         let mut best: Option<MSAmandaScoringResult> = None;
 
+        // Eq (7): sweep peak-picking depth m over [1..10] (config min_m..=max_m), scoring each
+        // depth independently and keeping the max-scoring one below.
         for m in self.config.min_m..=self.config.max_m {
             let picked = pick_peaks(&windowed, m);
             let capital_n = picked.len();
@@ -478,6 +486,8 @@ impl MSAmanda<'_> {
                 continue;
             }
 
+            // e1(s,m)-t and eN(s,m)+t (eq 2/3 denominator): tolerance-expanded m/z range of the
+            // first and last picked peak.
             let (e1_lower, _) = self
                 .config
                 .fragment_tolerance
@@ -490,6 +500,8 @@ impl MSAmanda<'_> {
             let en_upper = en_upper.value;
             let range = en_upper - e1_lower;
 
+            // Eq (2): F(s,pep,m), theoretical ions whose raw m/z falls within [e1_lower, en_upper];
+            // union_width of those ions' tolerance windows gives the eq (3) numerator directly.
             let overlap_width = union_width(
                 theoretical_ions
                     .iter()
@@ -516,25 +528,30 @@ impl MSAmanda<'_> {
                 }
             }
 
+            // n, matched peak count, feeds eq (1) and eq (6).
             let n = matched_indices.len();
             let matched_intensity: f64 = matched_indices
                 .iter()
                 .map(|&idx| picked[idx].intensity)
                 .sum();
+            // Eq (6): eif(s,pep,m) = sum I(matched) / sum I(picked).
             let eif = if total_intensity > 0.0 {
                 matched_intensity / total_intensity
             } else {
                 0.0
             };
 
+            // Eq (3): p(s,pep,m) = (|F|*2t - O(F)) / ((eN+t)-(e1-t)) = overlap_width / range.
             let p = if n == 0 || range <= 0.0 {
                 0.0
             } else {
                 (overlap_width / range).clamp(0.0, 1.0)
             };
 
+            // Eq (1): P(n,p,N) with N = capital_n (picked peaks), n = matched peaks, p from eq (3).
             let p_value = cumulative_binomial_at_least(n, capital_n, p);
 
+            // Eq (7): S(s,pep) = -10 * log10(P(n,p,N) / eif) for this depth m.
             let score = if n == 0 || eif <= 0.0 {
                 0.0
             } else {
@@ -667,19 +684,6 @@ mod tests {
         proforma_string
     }
 
-    /// Builds a [`Spectrum`] from raw m/z + intensity arrays for scoring, via an `mzdata`
-    /// spectrum and [`deconvolution::Spectrum::from_mzdata_spectrum`].
-    fn spectrum_from_arrays(
-        mz: &[f64],
-        intensity: &[f64],
-        precursor_charge: i32,
-        precursor_mz: f64,
-    ) -> Spectrum {
-        let mzdata_spectrum =
-            crate::utils::tests::build_raw_spectrum(mz, intensity, precursor_charge, precursor_mz);
-        deconvolution::Spectrum::from_mzdata_spectrum(&mzdata_spectrum, None).unwrap()
-    }
-
     /// Reads MS Amanda's own search results for the same spectra used by `xcorr`'s
     /// `test_xcorr` (see `crate::utils::tests::read_test_data`), for comparison against this
     /// implementation. `TEST_NUMBER_OF_PSMS` limits to the X best scored PSMs, same convention
@@ -747,9 +751,10 @@ mod tests {
             .filter_map(|idx| {
                 let scan = msamanda_df["Scan Number"].i64().unwrap().get(idx).unwrap();
 
-                // Not every scan in the MS Amanda results has a pre-extracted spectrum parquet
+                // Not every scan in the MS Amanda results has a pre-extracted spectrum fixture
                 // file (see `crate::utils::tests::spectrum_extraction`); skip those.
-                if !PathBuf::from(format!("test_files/spectra/scan_{scan}.parquet")).exists() {
+                if !PathBuf::from(format!("test_files/spectra/scan_{scan}.postcard.zst")).exists()
+                {
                     return None;
                 }
 
@@ -767,12 +772,12 @@ mod tests {
                     .unwrap() as u64;
                 let sequence = msamanda_df["Sequence"].str().unwrap().get(idx).unwrap();
                 let charge = msamanda_df["Charge"].i64().unwrap().get(idx).unwrap() as i32;
-                let precursor_mz = msamanda_df["m/z"].f64().unwrap().get(idx).unwrap();
 
                 let proforma_peptide = build_proforma(sequence);
-                let (mz_array, intensity_array) = get_spectrum(scan.to_string().as_str());
+                let spectrum = get_spectrum(scan.to_string().as_str());
                 let mut spectrum =
-                    spectrum_from_arrays(&mz_array, &intensity_array, charge, precursor_mz);
+                    deconvolution::Spectrum::from_mzdata_spectrum(&spectrum, Some(charge as usize))
+                        .ok()?;
                 deconvolution::deisotope_spectrum(
                     &mut spectrum,
                     &FragmentToleranceAdapter(&config.fragment_tolerance),

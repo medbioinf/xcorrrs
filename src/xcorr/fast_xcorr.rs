@@ -836,8 +836,7 @@ mod tests {
                     .unwrap();
                 let charge = comet_df["charge"].i64().unwrap().get(idx).unwrap() as i32;
 
-                let (mz_array, intensity_array) = get_spectrum(scan.to_string().as_str());
-                let spectrum = build_raw_spectrum(&mz_array, &intensity_array, charge, 0.0);
+                let spectrum = get_spectrum(scan.to_string().as_str());
 
                 let config: FinalizedConfiguration = Configuration {
                     use_flanking_peaks: true,
@@ -847,7 +846,8 @@ mod tests {
                 .into();
 
                 // fast xcorr implementation
-                let fast_xcorr = FastXcorr::new(&config, &spectrum, None).unwrap();
+                let fast_xcorr =
+                    FastXcorr::new(&config, &spectrum, Some(charge as usize)).unwrap();
 
                 let scoring = fast_xcorr.xcorr_peptide(proforma_peptide, None).unwrap();
 

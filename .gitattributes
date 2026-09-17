@@ -1,1 +1,1 @@
-test_files/spectra/*.parquet binary
+test_files/spectra/*.postcard.zst binary

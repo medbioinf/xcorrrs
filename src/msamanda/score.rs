@@ -107,6 +107,12 @@ impl Default for FinalizedConfiguration {
 pub enum Error {
     #[error("Empty spectrum")]
     EmptySpectrum,
+    #[error("Spectrum has no precursor charge and no charge fallback was given")]
+    MissingCharge,
+    #[error("Spectrum has no precursor m/z")]
+    MissingPrecursorMz,
+    #[error("Spectrum is not centroided (profile signal continuity) - pick peaks before scoring")]
+    UncentroidedSpectrum,
     #[error("Invalid ProForma string: {0:?}")]
     InvalidProForma(Vec<BoxedError<'static, BasicKind>>),
     #[error("Unable to create theoretical spectra: {0:?}")]
@@ -661,30 +667,17 @@ mod tests {
         proforma_string
     }
 
-    /// Builds a [`Spectrum`] from raw m/z + intensity arrays for scoring.
+    /// Builds a [`Spectrum`] from raw m/z + intensity arrays for scoring, via an `mzdata`
+    /// spectrum and [`deconvolution::Spectrum::from_mzdata_spectrum`].
     fn spectrum_from_arrays(
-        mz: &ndarray::Array1<f64>,
-        intensity: &ndarray::Array1<f64>,
+        mz: &[f64],
+        intensity: &[f64],
         precursor_charge: i32,
         precursor_mz: f64,
     ) -> Spectrum {
-        let mut peaks = HashMap::with_capacity(mz.len());
-        let mut masses = BTreeSet::new();
-
-        for (&mz_value, &intensity_value) in mz.iter().zip(intensity.iter()) {
-            let mz_value = OrderedFloat(mz_value);
-            masses.insert(mz_value);
-            peaks.insert(get_mass_index(mz_value), OrderedFloat(intensity_value));
-        }
-
-        Spectrum {
-            peaks,
-            masses,
-            precursor: Precursor {
-                charge: precursor_charge,
-                mz: OrderedFloat(precursor_mz),
-            },
-        }
+        let mzdata_spectrum =
+            crate::utils::tests::build_raw_spectrum(mz, intensity, precursor_charge, precursor_mz);
+        deconvolution::Spectrum::from_mzdata_spectrum(&mzdata_spectrum, None).unwrap()
     }
 
     /// Reads MS Amanda's own search results for the same spectra used by `xcorr`'s
@@ -725,11 +718,10 @@ mod tests {
     // same spectra as `xcorr::fast_xcorr::tests::test_xcorr`.
     #[test]
     fn test_msamanda_scoring() {
-        use ndarray_stats::DeviationExt;
         use polars::prelude::*;
         use rayon::prelude::*;
 
-        use crate::utils::tests::get_spectrum;
+        use crate::utils::tests::{get_spectrum, mean_sq_err};
 
         let msamanda_df = read_test_data();
 
@@ -893,12 +885,16 @@ mod tests {
             plot.write_html("99-msamanda_score_vs_amanda_score.html");
         }
 
-        let scaled_amanda_score =
-            ndarray::Array1::from_vec(amanda_score_col).mapv(|value| value / max_score);
-        let scaled_rs_score =
-            ndarray::Array1::from_vec(rs_score_col).mapv(|value| value / max_score);
+        let scaled_amanda_score = amanda_score_col
+            .into_iter()
+            .map(|value| value / max_score)
+            .collect::<Vec<f64>>();
+        let scaled_rs_score = rs_score_col
+            .into_iter()
+            .map(|value| value / max_score)
+            .collect::<Vec<f64>>();
 
-        let rmse = scaled_amanda_score.mean_sq_err(&scaled_rs_score).unwrap();
+        let rmse = mean_sq_err(&scaled_amanda_score, &scaled_rs_score);
 
         println!("RMSE amanda_score vs rs_score (normalized): {rmse}");
 

@@ -5,8 +5,10 @@ use thiserror::Error;
 pub enum Error {
     #[error("Empty experimental m/z")]
     EmptyExperimentalSpectrum,
-    #[error("m/z ({0}) and intensities ({1}) arrays must have the same length")]
-    ExperimentalSpectrumShape(usize, usize),
+    #[error("Spectrum has no precursor charge and no charge fallback was given")]
+    MissingCharge,
+    #[error("Spectrum is not centroided (profile signal continuity) - pick peaks before scoring")]
+    UncentroidedSpectrum,
     #[error("Invalid configuration: {0}")]
     InvalidConfiguration(String),
     #[error("Invalid ProForma string: {0:?}")]

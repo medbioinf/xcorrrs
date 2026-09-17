@@ -1,6 +1,13 @@
 use std::collections::{BTreeSet, HashMap};
 
+use mzdata::prelude::{IonProperties, PrecursorSelection, SpectrumLike};
+use mzpeaks::{CentroidPeak, DeconvolutedPeak};
 use ordered_float::OrderedFloat;
+
+use crate::{
+    msamanda::score::Error,
+    utils::{extract_peaks, resolve_precursor_charge},
+};
 
 #[derive(Clone, Debug)]
 pub struct Precursor {
@@ -16,6 +23,49 @@ pub struct Spectrum {
     /// mz-values of peaks as f64, sorted
     pub masses: BTreeSet<OrderedFloat<f64>>,
     pub precursor: Precursor,
+}
+
+impl Spectrum {
+    /// Builds a [`Spectrum`] from an `mzdata` spectrum, ready for [`deisotope_spectrum`] and
+    /// [`crate::msamanda::score::MSAmanda::new`].
+    ///
+    /// The precursor charge is taken from `spectrum`'s precursor ion, falling back to
+    /// `charge_fallback` if the spectrum doesn't report one; [`Error::MissingCharge`] is
+    /// returned if neither is available. The precursor m/z must be present on the spectrum
+    /// itself (there is no equivalent fallback for it).
+    pub fn from_mzdata_spectrum<S: SpectrumLike<CentroidPeak, DeconvolutedPeak>>(
+        spectrum: &S,
+        charge_fallback: Option<usize>,
+    ) -> Result<Self, Error> {
+        let charge = resolve_precursor_charge(spectrum, charge_fallback)
+            .ok_or(Error::MissingCharge)? as i32;
+
+        let precursor_mz = spectrum
+            .precursor()
+            .and_then(|precursor| precursor.ion())
+            .map(|ion| ion.mz())
+            .ok_or(Error::MissingPrecursorMz)?;
+
+        let mut peaks = HashMap::new();
+        let mut masses = BTreeSet::new();
+
+        let (mz_values, intensities) =
+            extract_peaks(spectrum).map_err(|_| Error::UncentroidedSpectrum)?;
+        for (mz, intensity) in mz_values.into_iter().zip(intensities) {
+            let mz = OrderedFloat(mz);
+            masses.insert(mz);
+            peaks.insert(get_mass_index(mz), OrderedFloat(intensity));
+        }
+
+        Ok(Spectrum {
+            peaks,
+            masses,
+            precursor: Precursor {
+                charge,
+                mz: OrderedFloat(precursor_mz),
+            },
+        })
+    }
 }
 
 pub trait Tolerance {

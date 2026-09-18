@@ -86,10 +86,12 @@ pub type FinalizedConfiguration = crate::utils::Finalized<Configuration>;
 pub enum Error {
     #[error("Empty spectrum")]
     EmptySpectrum,
-    #[error("Spectrum has no precursor charge and no charge fallback was given")]
+    #[error("Spectrum has no precursor charge")]
     MissingCharge,
     #[error("Spectrum has no precursor m/z")]
     MissingPrecursorMz,
+    #[error(transparent)]
+    InvalidPrecursor(#[from] crate::utils::PrecursorMultiplicityError),
     #[error("Spectrum is not centroided (profile signal continuity) - pick peaks before scoring")]
     UncentroidedSpectrum,
     #[error("Invalid ProForma string: {0:?}")]
@@ -753,13 +755,10 @@ mod tests {
                     .get(idx)
                     .unwrap() as u64;
                 let sequence = msamanda_df["Sequence"].str().unwrap().get(idx).unwrap();
-                let charge = msamanda_df["Charge"].i64().unwrap().get(idx).unwrap() as i32;
 
                 let proforma_peptide = build_proforma(sequence);
                 let spectrum = get_spectrum(scan.to_string().as_str());
-                let mut spectrum =
-                    deconvolution::Spectrum::from_mzdata_spectrum(&spectrum, Some(charge as usize))
-                        .ok()?;
+                let mut spectrum = deconvolution::Spectrum::from_mzdata_spectrum(&spectrum).ok()?;
                 deconvolution::deisotope_spectrum(
                     &mut spectrum,
                     &FragmentToleranceAdapter(&config.fragment_tolerance),

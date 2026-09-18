@@ -41,16 +41,16 @@ impl FastXcorr<'_> {
     ///
     /// Arguments:
     /// * `config` - The configuration to use for scoring.
-    /// * `experimental_spectrum` - The experimental spectrum to score against.
-    /// * `charge_fallback` - Precursor charge to use if `experimental_spectrum` doesn't report one.
+    /// * `experimental_spectrum` - The experimental spectrum to score against. Must report its
+    ///   own precursor charge; scoring fails with [`Error::MissingCharge`] otherwise. Must also
+    ///   report exactly one precursor with exactly one selected ion (e.g. not a chimeric
+    ///   spectrum); scoring fails with [`Error::InvalidPrecursor`] otherwise.
     ///
     pub fn new<'a, S: SpectrumLike<CentroidPeak, DeconvolutedPeak>>(
         config: &'a FinalizedConfiguration,
         experimental_spectrum: &S,
-        charge_fallback: Option<usize>,
     ) -> Result<FastXcorr<'a>, Error> {
-        let charge = resolve_precursor_charge(experimental_spectrum, charge_fallback)
-            .ok_or(Error::MissingCharge)?;
+        let charge = resolve_precursor_charge(experimental_spectrum)?.ok_or(Error::MissingCharge)?;
 
         let (raw_mz, raw_intensities) =
             extract_peaks(experimental_spectrum).map_err(|_| Error::UncentroidedSpectrum)?;
@@ -638,6 +638,28 @@ mod tests {
         )
     }
 
+    /// A spectrum with more than one selected ion on its precursor (e.g. a chimeric spectrum)
+    /// must be rejected, not silently scored against the first ion.
+    #[test]
+    fn test_new_rejects_multiple_selected_ions() {
+        let config: FinalizedConfiguration = Configuration::default().into();
+        let mut spectrum = build_raw_spectrum(&[100.0], &[1.0], 2, 300.0);
+        spectrum.description.precursor[0]
+            .ions
+            .push(mzdata::spectrum::SelectedIon {
+                mz: 305.0,
+                charge: Some(3),
+                ..Default::default()
+            });
+
+        assert!(matches!(
+            FastXcorr::new(&config, &spectrum),
+            Err(Error::InvalidPrecursor(
+                crate::utils::PrecursorMultiplicityError::MultipleSelectedIons(2)
+            ))
+        ));
+    }
+
     /// Checks the Xcorr spectrum (y-prime) against the data provided by Eng
     ///
     #[test]
@@ -657,7 +679,7 @@ mod tests {
         let spectrum =
             build_raw_spectrum(&experimental_spectrum.0, &experimental_spectrum.1, 1, 0.0);
 
-        let xcorr = FastXcorr::new(&config, &spectrum, None).unwrap();
+        let xcorr = FastXcorr::new(&config, &spectrum).unwrap();
 
         let rouneded_xcorr_sped = xcorr
             .preprocessed_experimental_spectrum
@@ -773,7 +795,7 @@ mod tests {
         let spectrum =
             build_raw_spectrum(&experimental_spectrum.0, &experimental_spectrum.1, 1, 0.0);
 
-        let xcorr = FastXcorr::new(&config, &spectrum, None).unwrap();
+        let xcorr = FastXcorr::new(&config, &spectrum).unwrap();
 
         if env::var("VERBOSE").is_ok() {
             let peptide = PeptidoformIon::pro_forma("DIGSETK", &Ontologies::empty())
@@ -834,7 +856,6 @@ mod tests {
                     .unwrap()
                     .get(idx)
                     .unwrap();
-                let charge = comet_df["charge"].i64().unwrap().get(idx).unwrap() as i32;
 
                 let spectrum = get_spectrum(scan.to_string().as_str());
 
@@ -849,17 +870,9 @@ mod tests {
                 .into();
 
                 // fast xcorr implementation
-                let fast_xcorr =
-                    FastXcorr::new(&config, &spectrum, Some(charge as usize)).unwrap();
+                let fast_xcorr = FastXcorr::new(&config, &spectrum).unwrap();
 
                 let scoring = fast_xcorr.xcorr_peptide(proforma_peptide, None).unwrap();
-
-                // if scan == 84616 {
-                //     println!(
-                //         "scan = 84616, {proforma_peptide}/{charge}, ions_matched = {}, ions_total = {}, mzscore = {}, comet = {}",
-                //         scoring.ions_matched, scoring.ions_total, scoring.score, comet_xcorr
-                //     );
-                // }
 
                 (
                     scan,

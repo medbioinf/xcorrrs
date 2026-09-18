@@ -19,21 +19,44 @@ use mzpeaks::{CentroidLike, DeconvolutedCentroidLike};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Resolves the fragment/precursor charge to use for a spectrum: the spectrum's own precursor
-/// charge takes precedence, falling back to `charge_fallback` only when the spectrum doesn't
-/// report one (e.g. it wasn't determined by the instrument/file).
-pub fn resolve_precursor_charge<C, D, S>(spectrum: &S, charge_fallback: Option<usize>) -> Option<usize>
+/// A spectrum reported more precursors, or more selected ions within a precursor, than this
+/// crate currently knows how to pick between (e.g. a chimeric spectrum).
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrecursorMultiplicityError {
+    #[error("spectrum has {0} precursors, expected exactly 1")]
+    MultiplePrecursors(usize),
+    #[error("spectrum's precursor has {0} selected ions, expected exactly 1")]
+    MultipleSelectedIons(usize),
+}
+
+/// Resolves the precursor charge reported by a spectrum, or `None` if it doesn't report one
+/// (e.g. it wasn't determined by the instrument/file).
+///
+/// Errors if the spectrum has more than one precursor, or its precursor has more than one
+/// selected ion (e.g. a chimeric spectrum) - this crate doesn't yet support picking between them.
+pub fn resolve_precursor_charge<C, D, S>(
+    spectrum: &S,
+) -> Result<Option<usize>, PrecursorMultiplicityError>
 where
     C: CentroidLike,
     D: DeconvolutedCentroidLike,
     S: SpectrumLike<C, D>,
 {
-    spectrum
-        .precursor()
-        .and_then(|precursor| precursor.ion())
+    let precursor_count = spectrum.precursor_count();
+    if precursor_count > 1 {
+        return Err(PrecursorMultiplicityError::MultiplePrecursors(precursor_count));
+    }
+    let Some(precursor) = spectrum.precursor() else {
+        return Ok(None);
+    };
+    let ion_count = precursor.iter().count();
+    if ion_count > 1 {
+        return Err(PrecursorMultiplicityError::MultipleSelectedIons(ion_count));
+    }
+    Ok(precursor
+        .ion()
         .and_then(|ion| ion.charge())
-        .and_then(|charge| usize::try_from(charge).ok())
-        .or(charge_fallback)
+        .and_then(|charge| usize::try_from(charge).ok()))
 }
 
 /// Marker error returned by [`extract_peaks`] when the spectrum's signal continuity is
@@ -402,6 +425,47 @@ pub mod tests {
         });
 
         RawSpectrum { description, arrays }
+    }
+
+    /// A spectrum with more than one selected ion on its precursor (e.g. a chimeric spectrum)
+    /// must be rejected, not silently scored against the first ion.
+    #[test]
+    fn test_resolve_precursor_charge_rejects_multiple_selected_ions() {
+        let mut spectrum = build_raw_spectrum(&[100.0], &[1.0], 2, 300.0);
+        spectrum.description.precursor[0].ions.push(SelectedIon {
+            mz: 305.0,
+            charge: Some(3),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            resolve_precursor_charge::<mzpeaks::CentroidPeak, mzpeaks::DeconvolutedPeak, _>(
+                &spectrum
+            ),
+            Err(PrecursorMultiplicityError::MultipleSelectedIons(2))
+        );
+    }
+
+    /// A spectrum with more than one precursor must be rejected, not silently scored against
+    /// the first one.
+    #[test]
+    fn test_resolve_precursor_charge_rejects_multiple_precursors() {
+        let mut spectrum = build_raw_spectrum(&[100.0], &[1.0], 2, 300.0);
+        spectrum.description.precursor.push(Precursor {
+            ions: vec![SelectedIon {
+                mz: 500.0,
+                charge: Some(1),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            resolve_precursor_charge::<mzpeaks::CentroidPeak, mzpeaks::DeconvolutedPeak, _>(
+                &spectrum
+            ),
+            Err(PrecursorMultiplicityError::MultiplePrecursors(2))
+        );
     }
 
     /// A profile (unpicked) spectrum must be rejected by [`extract_peaks`], not silently

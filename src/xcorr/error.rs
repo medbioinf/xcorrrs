@@ -5,8 +5,10 @@ use thiserror::Error;
 pub enum Error {
     #[error("Empty experimental m/z")]
     EmptyExperimentalSpectrum,
-    #[error("Spectrum has no precursor charge and no charge fallback was given")]
+    #[error("Spectrum has no precursor charge")]
     MissingCharge,
+    #[error(transparent)]
+    InvalidPrecursor(#[from] crate::utils::PrecursorMultiplicityError),
     #[error("Spectrum is not centroided (profile signal continuity) - pick peaks before scoring")]
     UncentroidedSpectrum,
     #[error("Invalid configuration: {0}")]

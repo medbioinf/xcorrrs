@@ -29,16 +29,14 @@ impl Spectrum {
     /// Builds a [`Spectrum`] from an `mzdata` spectrum, ready for [`deisotope_spectrum`] and
     /// [`crate::msamanda::score::MSAmanda::new`].
     ///
-    /// The precursor charge is taken from `spectrum`'s precursor ion, falling back to
-    /// `charge_fallback` if the spectrum doesn't report one; [`Error::MissingCharge`] is
-    /// returned if neither is available. The precursor m/z must be present on the spectrum
-    /// itself (there is no equivalent fallback for it).
+    /// The precursor charge and m/z must both be present on `spectrum` itself;
+    /// [`Error::MissingCharge`] / [`Error::MissingPrecursorMz`] are returned otherwise.
+    /// `spectrum` must also report exactly one precursor with exactly one selected ion (e.g.
+    /// not a chimeric spectrum); [`Error::InvalidPrecursor`] is returned otherwise.
     pub fn from_mzdata_spectrum<S: SpectrumLike<CentroidPeak, DeconvolutedPeak>>(
         spectrum: &S,
-        charge_fallback: Option<usize>,
     ) -> Result<Self, Error> {
-        let charge = resolve_precursor_charge(spectrum, charge_fallback)
-            .ok_or(Error::MissingCharge)? as i32;
+        let charge = resolve_precursor_charge(spectrum)?.ok_or(Error::MissingCharge)? as i32;
 
         let precursor_mz = spectrum
             .precursor()
@@ -164,4 +162,31 @@ pub fn deisotope_spectrum<T: Tolerance>(
 
 pub fn get_mass_index(mass: OrderedFloat<f64>) -> i32 {
     (mass * 10000.0).into_inner() as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use mzdata::spectrum::SelectedIon;
+
+    use super::*;
+    use crate::utils::{tests::build_raw_spectrum, PrecursorMultiplicityError};
+
+    /// A spectrum with more than one selected ion on its precursor (e.g. a chimeric spectrum)
+    /// must be rejected, not silently scored against the first ion.
+    #[test]
+    fn test_from_mzdata_spectrum_rejects_multiple_selected_ions() {
+        let mut spectrum = build_raw_spectrum(&[100.0], &[1.0], 2, 300.0);
+        spectrum.description.precursor[0].ions.push(SelectedIon {
+            mz: 305.0,
+            charge: Some(3),
+            ..Default::default()
+        });
+
+        assert!(matches!(
+            Spectrum::from_mzdata_spectrum(&spectrum),
+            Err(Error::InvalidPrecursor(
+                PrecursorMultiplicityError::MultipleSelectedIons(2)
+            ))
+        ));
+    }
 }
